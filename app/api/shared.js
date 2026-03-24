@@ -154,12 +154,14 @@ export async function resetEva() {
 }
 
 export function label(c) {
+  // Label remains MMPI-2 RF
   return c == 2 ? "MMPI-2 RF" : "ECO";
 }
 
 export function pdfURL(cid, pid, code, c) {
-  const type = c == 2 ? "MMPI-2 RF" : "ECO";
-  return `/api/path-pdf?cid=${cid}&pid=${pid}&code=${code}&type=${encodeURIComponent(type)}`;
+  // URI safely uses "MMPI" instead of "MMPI-2 RF"
+  const typeUri = c == 2 ? "MMPI" : "ECO";
+  return `/api/path-pdf?cid=${cid}&pid=${pid}&code=${code}&type=${encodeURIComponent(typeUri)}`;
 }
 
 export async function evaStatusSingleton() {
