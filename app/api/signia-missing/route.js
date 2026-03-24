@@ -49,6 +49,7 @@ async function GET(req, context) {
       const eco = ecoMap[u.pathId] || null;
       const mmpi = mmpiMap[u.pathId] || null;
 
+      // Ensure 'url' assigns standard 'MMPI' but retains visual 'MMPI-2 RF' label
       u.ecoPrueba = eco ? { label: "ECO", url: `/api/path-pdf?cid=${eco.candidato_id}&pid=${eco.pruebaId}&code=${eco.code}&type=${encodeURIComponent("ECO")}` } : null;
       u.mmpiPrueba = mmpi ? { label: "MMPI-2 RF", url: `/api/path-pdf?cid=${mmpi.candidato_id}&pid=${mmpi.pruebaId}&code=${mmpi.code}&type=${encodeURIComponent("MMPI")}` } : null;
 
