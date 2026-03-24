@@ -45,12 +45,12 @@ async function GET(req, context) {
       u.hasPath = !!u.pathId;
       u.hasCurp = !!u.curpPath;
       u.curpAbsPath = u.curpPath ? u.curpPath.startsWith("http") ? u.curpPath : CURP_ABSOLUTE_ROOT + u.curpPath : "";
-      
+
       const eco = ecoMap[u.pathId] || null;
       const mmpi = mmpiMap[u.pathId] || null;
 
       u.ecoPrueba = eco ? { label: "ECO", url: `/api/path-pdf?cid=${eco.candidato_id}&pid=${eco.pruebaId}&code=${eco.code}&type=${encodeURIComponent("ECO")}` } : null;
-      u.mmpiPrueba = mmpi ? { label: "MMPI-2 RF", url: `/api/path-pdf?cid=${mmpi.candidato_id}&pid=${mmpi.pruebaId}&code=${mmpi.code}&type=${encodeURIComponent("MMPI-2 RF")}` } : null;
+      u.mmpiPrueba = mmpi ? { label: "MMPI-2 RF", url: `/api/path-pdf?cid=${mmpi.candidato_id}&pid=${mmpi.pruebaId}&code=${mmpi.code}&type=${encodeURIComponent("MMPI")}` } : null;
 
       u.hasEco = !!eco;
       u.hasMmpi = !!mmpi;

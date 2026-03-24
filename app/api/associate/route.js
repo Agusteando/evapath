@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSigniaPool, logAudit } from "../shared.js";
-import { getServerSession } from "next-auth/next");
+import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../lib/auth";
 
 export async function POST(req, context) {
