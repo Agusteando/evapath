@@ -19,7 +19,7 @@ export async function GET(req) {
 
   // Check against the updated "MMPI" type param. 
   // We keep "MMPI-2 RF" gracefully for backwards compatibility if a user already had a browser tab open.
-  const isMMPI = type === "MMPI" || type === "MMPI-2";
+  const isMMPI = type === "MMPI" || type === "MMPI 2";
   const remoteUrl = `https://reclutamiento.casitaapps.com/${isMMPI ? "resultados-rf/" : "resultados/"}${cid}_${pid}_${code}.pdf`;
 
   // Fetch candidate info for readable audit logs

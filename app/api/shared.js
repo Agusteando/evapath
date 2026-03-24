@@ -160,7 +160,7 @@ export function label(c) {
 
 export function pdfURL(cid, pid, code, c) {
   // URI safely uses "MMPI" instead of "MMPI-2 RF"
-  const typeUri = c == 2 ? "MMPI-2" : "ECO";
+  const typeUri = c == 2 ? "MMPI 2" : "ECO";
   return `/api/path-pdf?cid=${cid}&pid=${pid}&code=${code}&type=${encodeURIComponent(typeUri)}`;
 }
 
