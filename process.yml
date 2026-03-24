@@ -1,0 +1,9 @@
+apps:
+  - name: EVAPATH
+    script: node_modules/next/dist/bin/next
+    args: start
+    cwd: .
+    watch: false
+    env:
+      NODE_ENV: production
+      PORT: 15000

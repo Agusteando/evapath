@@ -1,0 +1,112 @@
+...
+<script>
+/* --- Code above stays the same --- */
+
+// Continue Asociar (HIIT) logic
+async function associate(source, cid) {
+  const u = missList[idx];
+  await fetch('/api/associate', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({signiaId: u.id, source, cid})
+  });
+  if (source === 'eva') u.evaId = cid;
+  if (source === 'path') u.pathId = cid;
+  renderLinker();
+}
+async function disassociate(source) {
+  const u = missList[idx];
+  await fetch('/api/disassociate', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({signiaId: u.id, source})
+  });
+  if (source === 'eva') u.evaId = null;
+  if (source === 'path') u.pathId = null;
+  renderLinker();
+}
+
+// Search EVA/PATH suggestion lists
+$('#lk-search-eva').oninput = async function(e) {
+  const term = e.target.value.trim();
+  if (!term) return $('#lk-eva-list').innerHTML = '';
+  const r = await fetch('/api/search-eva?q=' + encodeURIComponent(term)).then(r=>r.json());
+  $('#lk-eva-list').innerHTML = r.map(x =>
+    `<li><a onclick="associate('eva','${x.cid}')">${x.label}</a></li>`
+  ).join('');
+};
+$('#lk-search-path').oninput = async function(e) {
+  const term = e.target.value.trim();
+  if (!term) return $('#lk-path-list').innerHTML = '';
+  const r = await fetch('/api/search-path?q=' + encodeURIComponent(term)).then(r=>r.json());
+  $('#lk-path-list').innerHTML = r.map(x =>
+    `<li><a onclick="associate('path','${x.cid}')">${x.label}</a></li>`
+  ).join('');
+};
+
+// Undo buttons
+$('#eva-undo').onclick = () => disassociate('eva');
+$('#path-undo').onclick = () => disassociate('path');
+
+// HIIT navigation
+$('#lk-prev').onclick = () => { if(idx > 0) { idx--; renderLinker(); }};
+$('#lk-next').onclick = () => { if(idx < missList.length-1) { idx++; renderLinker(); }};
+window.associate = associate; // so that suggestion lists' onclick can work
+
+// Skip if low confidence (optional, just a label)
+$('#lk-skip').style.display = 'block';
+
+// "Sincronizar" — global auto-associate
+$('#btn-sync').onclick = async () => {
+  $('#btn-sync').classList.add('is-loading');
+  await fetch('/api/bulk-sync', {method:'POST'});
+  await fetchMissing(); renderLinker();
+  $('#btn-sync').classList.remove('is-loading');
+};
+
+// Filters for Asociar (link) tab
+$('#btn-all-signia').onclick = async () => { showMissing=false; $('#btn-all-signia').classList.add('is-filter'); $('#btn-missing-signia').classList.remove('is-filter'); await fetchMissing(); idx=0; renderLinker(); }
+$('#btn-missing-signia').onclick = async () => { showMissing=true; $('#btn-all-signia').classList.remove('is-filter'); $('#btn-missing-signia').classList.add('is-filter'); await fetchMissing(); idx=0; renderLinker(); }
+
+// Main tabs logic
+['signia','eva','path','link'].forEach(t=>{
+  document.querySelector('#tab-'+t).onclick=async()=>{
+    if(active!==t){
+      active=t;
+      setActive(t);
+      resetFilters();
+      if(t==='link') { await fetchMissing(); idx=0; renderLinker(); }
+      else { load(); }
+    }
+  };
+});
+
+// Table filter/search/pagination controls
+$('#btn-all').onclick=()=>{filter='all'; load();};
+$('#btn-matched').onclick=()=>{filter='matched'; load();};
+$('#btn-unmatched').onclick=()=>{filter='unmatched'; load();};
+$('#search').oninput=e=>{q=e.target.value;page=1;load();};
+$('#btn-prev').onclick=()=>{if(page>1){page--;load();}};
+$('#btn-next').onclick=()=>{if(page<last){page++;load();}};
+$('#page').onchange=()=>{let v=parseInt($('#page').value);if(v>=1&&v<=last){page=v;load();}};
+$('#pageSize').onchange=()=>{pageSize=parseInt($('#pageSize').value);page=1;load();};
+
+// Export CSV
+$('#btn-export').onclick=async()=>{
+  if(active==='link')return;
+  const data=await fetch(api(true)).then(r=>r.json());
+  const rows=(data.users||[]),keys=Object.keys(rows[0]||{});
+  const csv=[keys.join(',')].concat(rows.map(r=>keys.map(k=>JSON.stringify(r[k]||'')).join(','))).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='export.csv';a.click();
+};
+
+// Startup
+resetFilters();
+setActive('signia');
+load();
+initEvaStream();
+
+</script>
+</body>
+</html>
