@@ -383,7 +383,11 @@ class EvaService {
           throw new Error("Puppeteer page is closed or null");
         }
 
-        const url = `${base}${apiPath}`;
+        // Clean slash formatting for safe URL concatenation
+        const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+        const cleanPath = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+        const url = `${cleanBase}${cleanPath}`;
+        
         this._log(`GET ${url} (attempt ${attempts})`);
         console.log(`[EvaService DEBUG] Dispatching Node HTTP GET to: ${url}`);
 
