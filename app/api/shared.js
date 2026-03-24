@@ -20,6 +20,15 @@ async function initAuditTable(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
+    // Safely add human-readable target columns if they don't exist yet
+    try {
+      await db.query("ALTER TABLE audit_logs ADD COLUMN target_name VARCHAR(255) DEFAULT NULL");
+      await db.query("ALTER TABLE audit_logs ADD COLUMN target_email VARCHAR(255) DEFAULT NULL");
+    } catch (e) {
+      // Columns likely already exist (Error 1060: Duplicate column name)
+    }
+
     console.log("[initAuditTable] audit_logs table verified/created successfully in PATH DB.");
   } catch (err) {
     console.error("[initAuditTable] Failed to initialize audit_logs table:", err);
@@ -64,19 +73,25 @@ export function getPathPool() {
   return pools.path;
 }
 
-export async function logAudit(user, action_type, target_entity, source_system, status, metadata = {}) {
+export async function logAudit(user, action_type, target, source_system, status, metadata = {}) {
   try {
-    console.log(`[AuditLog] Writing ${action_type} for user: ${user?.email || 'system'} | target: ${target_entity} | status: ${status}`);
+    const targetId = typeof target === 'object' ? String(target.id) : String(target);
+    const targetName = typeof target === 'object' ? target.name : null;
+    const targetEmail = typeof target === 'object' ? target.email : null;
+
+    console.log(`[AuditLog] Writing ${action_type} for user: ${user?.email || 'system'} | target: ${targetName || targetId} | status: ${status}`);
     const db = getPathPool();
     await db.query(
-      `INSERT INTO audit_logs (user_email, user_name, user_photo, action_type, target_entity, source_system, status, metadata) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO audit_logs (user_email, user_name, user_photo, action_type, target_entity, target_name, target_email, source_system, status, metadata) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         user?.email || 'system',
         user?.name || 'System',
         user?.image || '',
         action_type,
-        String(target_entity),
+        targetId,
+        targetName,
+        targetEmail,
         source_system,
         status,
         JSON.stringify(metadata)

@@ -16,14 +16,13 @@ export async function GET(req) {
   const q = searchParams.get("q") || "";
 
   try {
-    // Explicitly using PATH pool for audit records
     const db = await getPathPool();
 
     let where = "";
     let params = [];
     if (q) {
-      where = "WHERE user_email LIKE ? OR action_type LIKE ? OR target_entity LIKE ?";
-      params = [`%${q}%`, `%${q}%`, `%${q}%`];
+      where = "WHERE user_email LIKE ? OR action_type LIKE ? OR target_entity LIKE ? OR target_name LIKE ? OR target_email LIKE ?";
+      params = [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`];
     }
 
     const offset = (page - 1) * pageSize;

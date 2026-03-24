@@ -55,7 +55,8 @@ export async function POST(req, context) {
     }
   }
 
-  await logAudit(session.user, "BULK_SYNC", "ALL", "SYSTEM", "SUCCESS", { evaSet, pathSet, totalSignia: sig.length });
+  const targetObj = { id: "ALL", name: "Múltiples Usuarios", email: "Proceso Masivo" };
+  await logAudit(session.user, "BULK_SYNC", targetObj, "SYSTEM", "SUCCESS", { evaSet, pathSet, totalSignia: sig.length });
 
   return NextResponse.json({ evaSet, pathSet });
 }

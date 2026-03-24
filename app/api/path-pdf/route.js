@@ -1,6 +1,6 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../lib/auth";
-import { logAudit } from "../shared";
+import { logAudit, getPathPool } from "../shared";
 import { NextResponse } from "next/server";
 
 export async function GET(req) {
@@ -20,12 +20,24 @@ export async function GET(req) {
   const isMMPI = type === "MMPI-2 RF";
   const remoteUrl = `https://reclutamiento.casitaapps.com/${isMMPI ? "resultados-rf/" : "resultados/"}${cid}_${pid}_${code}.pdf`;
 
+  // Fetch candidate info for readable audit logs
+  let targetObj = { id: cid, name: "Candidato Desconocido", email: "" };
+  try {
+    const pathDb = await getPathPool();
+    const [cand] = await pathDb.query("SELECT CONCAT_WS(' ', nombres, apellidopaterno, apellidomaterno) AS name, email FROM candidatos WHERE id = ?", [cid]);
+    if (cand.length) {
+      targetObj = { id: cid, name: cand[0].name || "Sin nombre", email: cand[0].email || "" };
+    }
+  } catch (e) {
+    console.warn("Could not fetch candidate details for audit", e);
+  }
+
   try {
     const pdfRes = await fetch(remoteUrl);
     if (!pdfRes.ok) throw new Error(`Remote returned ${pdfRes.status}`);
     const buf = await pdfRes.arrayBuffer();
 
-    await logAudit(session.user, "DOWNLOAD_PATH_PDF", cid, "PATH", "SUCCESS", { pid, code, type, remoteUrl });
+    await logAudit(session.user, "DOWNLOAD_PATH_PDF", targetObj, "PATH", "SUCCESS", { pid, code, type, remoteUrl });
 
     return new NextResponse(buf, {
       headers: {
@@ -34,7 +46,7 @@ export async function GET(req) {
       }
     });
   } catch (err) {
-    await logAudit(session.user, "DOWNLOAD_PATH_PDF", cid, "PATH", "ERROR", { pid, code, type, remoteUrl, error: err.message });
+    await logAudit(session.user, "DOWNLOAD_PATH_PDF", targetObj, "PATH", "ERROR", { pid, code, type, remoteUrl, error: err.message });
     return new NextResponse("Failed to download", { status: 500 });
   }
 }

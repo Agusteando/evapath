@@ -3,6 +3,52 @@ import { useState, useEffect } from "react";
 import Pagination from "../Pagination";
 import StatusBadge from "../StatusBadge";
 
+// Helper to translate action codes into human readable formats
+function parseActionDetails(log) {
+  const meta = log.metadata || {};
+  let title = log.action_type;
+  let description = "";
+
+  switch (log.action_type) {
+    case "DOWNLOAD_PATH_PDF":
+      title = "Descargó reporte psicométrico";
+      description = meta.type ? `Prueba: ${meta.type}` : "Sistema PATH";
+      break;
+    case "DOWNLOAD_EVA_PDF":
+      title = "Descargó reporte de competencias";
+      description = `Reporte Evaluatest (ID: ${meta.cid || log.target_entity})`;
+      break;
+    case "ASSOCIATE_USER":
+      title = "Vinculó expediente de candidato";
+      description = `Enlazado con sistema ${log.source_system} (ID Externo: ${meta.cid})`;
+      break;
+    case "DISASSOCIATE_USER":
+      title = "Desvinculó expediente de candidato";
+      description = `Desenlazado del sistema ${log.source_system}`;
+      break;
+    case "BULK_SYNC":
+      title = "Sincronización masiva ejecutada";
+      description = `Actualizó ${meta.evaSet || 0} EVA y ${meta.pathSet || 0} PATH`;
+      break;
+    case "UPDATE_NAMES":
+      title = "Actualizó nombres de expediente";
+      description = `Base de datos interna Signia`;
+      break;
+    case "GPT_EXTRACT_CURP":
+      title = "Extracción automática de CURP";
+      description = `Procesamiento mediante OpenAI OCR`;
+      break;
+  }
+  return { title, description };
+}
+
+function getInitials(name) {
+  if (!name || name === "Desconocido" || name === "System" || name === "Sistema") return "?";
+  const parts = name.trim().split(" ");
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export default function AuditView() {
   const [data, setData] = useState({ logs: [], loading: true, lastPage: 1, total: 0 });
   const [page, setPage] = useState(1);
@@ -34,7 +80,7 @@ export default function AuditView() {
           <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
           <input 
             type="search" 
-            placeholder="Buscar por correo del usuario, acción o entidad..." 
+            placeholder="Buscar por correo del usuario, candidato afectado, o acción..." 
             value={q} 
             onChange={(e) => { setQ(e.target.value); setPage(1); }} 
             className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" 
@@ -47,8 +93,8 @@ export default function AuditView() {
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold sticky top-0 z-10">
             <tr>
               <th className="px-8 py-3.5 tracking-wide">Usuario Actor</th>
-              <th className="px-8 py-3.5 tracking-wide">Acción</th>
-              <th className="px-8 py-3.5 tracking-wide">Entidad Destino</th>
+              <th className="px-8 py-3.5 tracking-wide">Acción Operativa</th>
+              <th className="px-8 py-3.5 tracking-wide">Registro / Candidato Afectado</th>
               <th className="px-8 py-3.5 tracking-wide">Fecha y Hora</th>
               <th className="px-8 py-3.5 tracking-wide">Estado</th>
             </tr>
@@ -65,38 +111,75 @@ export default function AuditView() {
                 <div className="font-semibold text-slate-700">No se encontraron registros</div>
               </td></tr>
             ) : (
-              data.logs.map((log) => (
-                <tr key={log.id} className="hover:bg-slate-50/80 transition-colors group">
-                  <td className="px-8 py-3">
-                    <div className="flex items-center gap-3">
-                      {log.user_photo ? (
-                        <img src={log.user_photo} alt={log.user_name} className="w-8 h-8 rounded-full border border-slate-200 shadow-sm" />
-                      ) : (
-                        <div className="h-8 w-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-xs shrink-0">
-                          {log.user_name?.charAt(0)}
+              data.logs.map((log) => {
+                const actionData = parseActionDetails(log);
+                const targetNameDisplay = log.target_name || "Desconocido";
+                const targetEmailDisplay = log.target_email || "";
+                
+                return (
+                  <tr key={log.id} className="hover:bg-slate-50/80 transition-colors group">
+                    {/* Usuario Actor */}
+                    <td className="px-8 py-3">
+                      <div className="flex items-center gap-3">
+                        {log.user_photo ? (
+                          <img src={log.user_photo} alt={log.user_name} className="w-8 h-8 rounded-full border border-slate-200 shadow-sm" />
+                        ) : (
+                          <div className="h-8 w-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-xs shrink-0">
+                            {log.user_name?.charAt(0)}
+                          </div>
+                        )}
+                        <div>
+                          <div className="font-bold text-slate-800">{log.user_name}</div>
+                          <div className="text-slate-500 text-xs font-mono">{log.user_email}</div>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Acción Operativa */}
+                    <td className="px-8 py-3">
+                      <span className="font-semibold text-slate-800">{actionData.title}</span>
+                      <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                        <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200 uppercase font-bold tracking-wide">
+                          {log.source_system}
+                        </span>
+                        <span>{actionData.description}</span>
+                      </div>
+                    </td>
+
+                    {/* Registro Afectado */}
+                    <td className="px-8 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center font-bold text-[10px] shrink-0">
+                          {getInitials(targetNameDisplay)}
+                        </div>
+                        <div className="flex flex-col min-w-0 max-w-[250px]">
+                          <span className="font-bold text-slate-700 truncate" title={targetNameDisplay}>{targetNameDisplay}</span>
+                          {targetEmailDisplay ? (
+                            <span className="text-xs text-slate-500 font-mono truncate" title={targetEmailDisplay}>{targetEmailDisplay}</span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 font-mono">ID: {log.target_entity}</span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Fecha y Hora */}
+                    <td className="px-8 py-3 text-slate-600 text-xs">
+                      {new Date(log.created_at).toLocaleString('es-MX', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </td>
+
+                    {/* Estado */}
+                    <td className="px-8 py-3">
+                      <StatusBadge status={log.status === 'SUCCESS' ? 'ok' : 'err'} label={log.status} />
+                      {log.status !== 'SUCCESS' && log.metadata?.error && (
+                        <div className="text-[9px] text-rose-500 max-w-[120px] truncate mt-1" title={log.metadata.error}>
+                          {log.metadata.error}
                         </div>
                       )}
-                      <div>
-                        <div className="font-bold text-slate-800">{log.user_name}</div>
-                        <div className="text-slate-500 text-xs font-mono">{log.user_email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-8 py-3">
-                    <span className="font-semibold text-slate-700">{log.action_type}</span>
-                    <div className="text-[10px] text-slate-400 mt-0.5">Vía {log.source_system}</div>
-                  </td>
-                  <td className="px-8 py-3 text-slate-600 font-mono text-xs">
-                    {log.target_entity}
-                  </td>
-                  <td className="px-8 py-3 text-slate-600">
-                    {new Date(log.created_at).toLocaleString('es-MX', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                  <td className="px-8 py-3">
-                    <StatusBadge status={log.status === 'SUCCESS' ? 'ok' : 'err'} label={log.status} />
-                  </td>
-                </tr>
-              ))
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

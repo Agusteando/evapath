@@ -71,11 +71,15 @@ export async function POST(req) {
     const session = await getServerSession(authOptions);
     if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
+    const targetObj = { id: "CURP", name: "Extracción OCR/GPT", email: "" };
+
     try {
         const { imageUrl } = await req.json();
         if (!imageUrl) {
             return NextResponse.json({ error: "Missing imageUrl" }, { status: 400 });
         }
+        targetObj.email = imageUrl; // Storing URL as reference
+
         const { buf, contentType } = await fetchFileBuffer(imageUrl);
 
         let imgBuf, imgType;
@@ -114,15 +118,15 @@ export async function POST(req) {
             const match = content.match(/\{[\s\S]*?\}/m);
             extracted = match ? JSON.parse(match[0]) : JSON.parse(content);
         } catch (e) {
-            await logAudit(session.user, "GPT_EXTRACT_CURP", imageUrl, "OPENAI", "ERROR", { error: "No valid JSON in reply", raw: content });
+            await logAudit(session.user, "GPT_EXTRACT_CURP", targetObj, "OPENAI", "ERROR", { error: "No valid JSON in reply", raw: content });
             return NextResponse.json({ error: "No valid JSON in reply", raw: content }, { status: 500 });
         }
         if (!("nombres" in extracted) || !("apellidoPaterno" in extracted) || !("apellidoMaterno" in extracted)) {
-            await logAudit(session.user, "GPT_EXTRACT_CURP", imageUrl, "OPENAI", "ERROR", { error: "Missing fields", raw: extracted });
+            await logAudit(session.user, "GPT_EXTRACT_CURP", targetObj, "OPENAI", "ERROR", { error: "Missing fields", raw: extracted });
             return NextResponse.json({ error: "Missing fields", raw: extracted }, { status: 500 });
         }
 
-        await logAudit(session.user, "GPT_EXTRACT_CURP", imageUrl, "OPENAI", "SUCCESS", { extracted });
+        await logAudit(session.user, "GPT_EXTRACT_CURP", targetObj, "OPENAI", "SUCCESS", { extracted });
 
         return NextResponse.json({
             nombres: extracted.nombres ?? "",
@@ -131,7 +135,7 @@ export async function POST(req) {
             raw: content
         });
     } catch (err) {
-        await logAudit(session?.user, "GPT_EXTRACT_CURP", null, "OPENAI", "ERROR", { error: String(err?.message || err) });
+        await logAudit(session?.user, "GPT_EXTRACT_CURP", targetObj, "OPENAI", "ERROR", { error: String(err?.message || err) });
         return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
     }
 }

@@ -15,11 +15,24 @@ async function GET(req, context) {
     return new NextResponse("EVA service not ready", { status: 503 });
   }
 
+  // Look up candidate name/email from Eva memory/cache for the audit log
+  let targetObj = { id: params.cid, name: "Candidato Desconocido", email: "" };
+  const userFound = eva.results.find((u) => String(u.CID) === String(params.cid)) || 
+                    Object.values(eva.cache).find((u) => String(u.CID) === String(params.cid));
+                    
+  if (userFound) {
+    targetObj = { 
+      id: params.cid, 
+      name: userFound.N || userFound.nombre || "Sin nombre", 
+      email: userFound.M || userFound.correo || "" 
+    };
+  }
+
   try {
     console.log("[PDF Report] Attempting to download PDF for CID:", params.cid);
     const pdf = await eva.downloadPDF(params.cid);
     
-    await logAudit(session.user, "DOWNLOAD_EVA_PDF", params.cid, "EVA", "SUCCESS", { cid: params.cid, size: pdf.length });
+    await logAudit(session.user, "DOWNLOAD_EVA_PDF", targetObj, "EVA", "SUCCESS", { size: pdf.length });
 
     return new NextResponse(pdf, {
       headers: { 
@@ -29,7 +42,7 @@ async function GET(req, context) {
     });
   } catch (err) {
     console.error("[PDF Report] Error downloading PDF for CID", params.cid, ":", err.message);
-    await logAudit(session.user, "DOWNLOAD_EVA_PDF", params.cid, "EVA", "ERROR", { error: err.message });
+    await logAudit(session.user, "DOWNLOAD_EVA_PDF", targetObj, "EVA", "ERROR", { error: err.message });
     
     return new NextResponse(
       JSON.stringify({ 

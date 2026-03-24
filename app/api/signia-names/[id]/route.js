@@ -16,12 +16,23 @@ async function PATCH(req, context) {
     return NextResponse.json({ error: "All fields required" }, { status: 400 });
 
   const signiaDB = await getSigniaPool();
+  
+  // Get existing user email for complete audit context
+  let userEmail = "";
+  try {
+    const [rows] = await signiaDB.query("SELECT email FROM user WHERE id=?", [id]);
+    if (rows.length) userEmail = rows[0].email;
+  } catch(e) {}
+
   await signiaDB.query(
     "UPDATE user SET nombres=?, apellidoPaterno=?, apellidoMaterno=? WHERE id=?",
     [nombres, apellidoPaterno, apellidoMaterno, id]
   );
 
-  await logAudit(session.user, "UPDATE_NAMES", id, "SIGNIA", "SUCCESS", { nombres, apellidoPaterno, apellidoMaterno });
+  const fullName = `${nombres} ${apellidoPaterno} ${apellidoMaterno}`.trim();
+  const targetObj = { id, name: fullName, email: userEmail };
+
+  await logAudit(session.user, "UPDATE_NAMES", targetObj, "SIGNIA", "SUCCESS", { nombres, apellidoPaterno, apellidoMaterno });
 
   return NextResponse.json({ ok: true });
 }
