@@ -8,6 +8,7 @@ import PathSearchView from "./components/views/PathSearchView";
 import LinkView from "./components/views/LinkView";
 import AutoMatchView from "./components/views/AutoMatchView";
 import AuditView from "./components/views/AuditView";
+import PostularView from "./components/views/PostularView";
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
@@ -58,6 +59,7 @@ export default function Dashboard() {
         {activeView === "link" && <LinkView setView={setActiveView} />}
         {activeView === "auto" && <AutoMatchView setView={setActiveView} />}
         {activeView === "audit" && <AuditView />}
+        {activeView === "postular" && <PostularView />}
       </main>
     </div>
   );

@@ -17,9 +17,11 @@ export async function GET(req) {
     return new NextResponse("Missing params", { status: 400 });
   }
 
-  // Bulletproof fallback: matches "MMPI" and legacy "MMPI-2 RF" regardless of spacing or URI encoding
+  // Check if it's MMPI strictly for the audit logs and download filename.
   const isMMPI = typeof typeParam === 'string' && typeParam.toUpperCase().includes("MMPI");
-  const remoteUrl = `https://reclutamiento.casitaapps.com/${isMMPI ? "resultados-rf/" : "resultados/"}${cid}_${pid}_${code}.pdf`;
+  
+  // ALL results (ECO and MMPI) are stored in the "resultados" folder on the PATH server.
+  const remoteUrl = `https://reclutamiento.casitaapps.com/resultados/${cid}_${pid}_${code}.pdf`;
 
   // Fetch candidate info for readable audit logs
   let targetObj = { id: cid, name: "Candidato Desconocido", email: "" };
@@ -35,7 +37,7 @@ export async function GET(req) {
 
   try {
     const pdfRes = await fetch(remoteUrl);
-    if (!pdfRes.ok) throw new Error(`Remote returned ${pdfRes.status}`);
+    if (!pdfRes.ok) throw new Error(`Remote returned ${pdfRes.status} for ${remoteUrl}`);
     const buf = await pdfRes.arrayBuffer();
 
     await logAudit(session.user, "DOWNLOAD_PATH_PDF", targetObj, "PATH", "SUCCESS", { pid, code, type: typeParam, remoteUrl });
