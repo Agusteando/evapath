@@ -5,6 +5,12 @@ const { authOptions } = require("../../lib/auth");
 
 const CURP_ABSOLUTE_ROOT = "https://colaborador.casitaapps.com";
 
+function hasLinkValue(value) {
+  if (value === null || value === undefined) return false;
+  const normalized = String(value).trim();
+  return Boolean(normalized && normalized !== "0" && normalized.toLowerCase() !== "null" && normalized.toLowerCase() !== "undefined");
+}
+
 async function extractCurpFields(curpPath) {
   if (!curpPath) return null;
   return null;
@@ -37,7 +43,7 @@ async function GET(req, context) {
     }
     const users = Array.from(usersById.values());
 
-    const pathIds = users.filter((u) => u.pathId).map((u) => u.pathId);
+    const pathIds = users.filter((u) => hasLinkValue(u.pathId)).map((u) => u.pathId);
     let pruebas = [];
     if (pathIds.length) {
       const [rows] = await pathDB.query(
@@ -60,8 +66,8 @@ async function GET(req, context) {
       u.fullName = [u.nombres, u.apellidoPaterno, u.apellidoMaterno]
         .filter(Boolean)
         .join(" ");
-      u.hasEva = !!u.evaId;
-      u.hasPath = !!u.pathId;
+      u.hasEva = hasLinkValue(u.evaId);
+      u.hasPath = hasLinkValue(u.pathId);
       u.hasCurp = !!u.curpPath;
       u.curpAbsPath = u.curpPath
         ? u.curpPath.startsWith("http")

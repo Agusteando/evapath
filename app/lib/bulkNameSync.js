@@ -2,12 +2,12 @@ import { getSigniaPool, getPathPool } from "./serverDb.js";
 import { computeNameMatchScore, tokenizeName } from "./nameMatch.js";
 import { getDisplayName, getCurrentStatus } from "./bulkEmailSync.js";
 import { getEvaEmail, getPathEmail, getSigniaEmail } from "./emailIdentity.js";
+import { hasLinkValue, normalizeLinkId } from "./linkIdentity.js";
 
 const DEFAULT_MIN_SCORE = 95;
 
 function normalizeId(value) {
-  if (value === null || value === undefined || value === "") return null;
-  return String(value);
+  return normalizeLinkId(value);
 }
 
 function signiaFullName(user = {}) {
@@ -209,8 +209,8 @@ export function getBulkNameOpportunity(signiaUsers, evaUsers, pathUsers, { minSc
   const claimCounts = new Map();
 
   for (const user of signiaUsers || []) {
-    const missingEva = !user.evaId;
-    const missingPath = !user.pathId;
+    const missingEva = !hasLinkValue(user.evaId);
+    const missingPath = !hasLinkValue(user.pathId);
     if (!missingEva && !missingPath) continue;
 
     const evaCandidates = missingEva
@@ -246,8 +246,8 @@ export function getBulkNameOpportunity(signiaUsers, evaUsers, pathUsers, { minSc
     if (!evaCandidate && !pathCandidate) continue;
 
     const user = row.user;
-    const missingEva = !user.evaId;
-    const missingPath = !user.pathId;
+    const missingEva = !hasLinkValue(user.evaId);
+    const missingPath = !hasLinkValue(user.pathId);
     const missingBoth = missingEva && missingPath;
     const canSetEva = missingEva && Boolean(evaCandidate);
     const canSetPath = missingPath && Boolean(pathCandidate);

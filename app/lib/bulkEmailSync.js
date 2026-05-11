@@ -1,11 +1,55 @@
 import { getSigniaPool, getPathPool } from "./serverDb.js";
 import { getEvaEmail, getPathEmail, getSigniaEmail, normalizeEmail } from "./emailIdentity.js";
+import { hasLinkValue, normalizeLinkId } from "./linkIdentity.js";
 
-export { normalizeEmail };
+export { normalizeEmail, hasLinkValue, normalizeLinkId };
 
-function normalizeId(value) {
-  if (value === null || value === undefined || value === "") return null;
-  return String(value);
+function toId(value) {
+  return normalizeLinkId(value);
+}
+
+function addCandidate(map, email, candidate) {
+  if (!email || !candidate?.id) return;
+  const key = normalizeEmail(email);
+  if (!key) return;
+  const existing = map.get(key) || [];
+  const candidateId = String(candidate.id);
+  if (!existing.some((item) => String(item.id) === candidateId)) {
+    existing.push(candidate);
+  }
+  map.set(key, existing);
+}
+
+function compareEvaCandidates(a, b) {
+  const statusRank = (candidate) => {
+    const status = String(candidate?.status || candidate?.estado || "").toLowerCase();
+    if (status.includes("evaluado") || status.includes("complet")) return 4;
+    if (status.includes("evaluando")) return 3;
+    if (status.includes("postulado")) return 2;
+    if (status.includes("invitado")) return 1;
+    return 0;
+  };
+
+  const dateValue = (candidate) => {
+    const raw = candidate?.fechaProceso || candidate?.processDate || candidate?.PD || "";
+    const time = raw ? new Date(raw).getTime() : 0;
+    return Number.isFinite(time) ? time : 0;
+  };
+
+  return statusRank(b) - statusRank(a) || dateValue(b) - dateValue(a) || String(b.id).localeCompare(String(a.id), undefined, { numeric: true });
+}
+
+function selectAvailableCandidate(candidates = [], ownerByCandidateId, currentUser) {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+
+  for (const candidate of candidates) {
+    const candidateId = toId(candidate?.id);
+    if (!candidateId) continue;
+    const owner = ownerByCandidateId.get(candidateId);
+    if (!owner || String(owner.id) === String(currentUser.id)) return candidate;
+  }
+
+  return null;
 }
 
 export function getDisplayName(user = {}) {
@@ -20,8 +64,8 @@ export function getDisplayName(user = {}) {
 }
 
 export function getCurrentStatus(user = {}) {
-  const missingEva = !user.evaId;
-  const missingPath = !user.pathId;
+  const missingEva = !hasLinkValue(user.evaId);
+  const missingPath = !hasLinkValue(user.pathId);
   if (missingEva && missingPath) return "Sin EVA y PATH";
   if (missingEva) return "Sin EVA";
   if (missingPath) return "Sin PATH";
@@ -49,6 +93,8 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       ready: false,
       status: "error",
       error: error?.message || "No se pudo inicializar EVA",
+      usersRead: 0,
+      emailsIndexed: 0,
     };
   }
 
@@ -68,6 +114,8 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       ready: false,
       status: eva.status || "init",
       error: waitError?.message || null,
+      usersRead: 0,
+      emailsIndexed: 0,
     };
   }
 
@@ -80,22 +128,37 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       ready: false,
       status: eva.status || "error",
       error: error?.message || "No se pudieron leer usuarios EVA",
+      usersRead: 0,
+      emailsIndexed: 0,
     };
   }
 
   const map = new Map();
   for (const user of evaUsers || []) {
     const email = getEvaEmail(user);
-    if (!email || !user.CID || map.has(email)) continue;
-    map.set(email, {
+    if (!email || !user.CID) continue;
+    addCandidate(map, email, {
       id: user.CID,
       name: user.nombre || user.N || "EVA",
       email,
+      status: user.estado || user.D || "",
+      fechaProceso: user.fechaProceso || user.PD || "",
       exactEmail: true,
     });
   }
 
-  return { map, ready: true, status: eva.status || "ready", error: null };
+  for (const [email, candidates] of map.entries()) {
+    map.set(email, candidates.sort(compareEvaCandidates));
+  }
+
+  return {
+    map,
+    ready: true,
+    status: eva.status || "ready",
+    error: null,
+    usersRead: Array.isArray(evaUsers) ? evaUsers.length : 0,
+    emailsIndexed: map.size,
+  };
 }
 
 export async function getPathEmailMap(pathDB, signiaUsers) {
@@ -113,14 +176,15 @@ export async function getPathEmailMap(pathDB, signiaUsers) {
     const [rows] = await pathDB.query(
       `SELECT id, CONCAT_WS(' ', nombres, apellidopaterno, apellidomaterno) AS name, email
        FROM candidatos
-       WHERE email IS NOT NULL AND LOWER(TRIM(email)) IN (${placeholders})`,
+       WHERE email IS NOT NULL AND LOWER(TRIM(email)) IN (${placeholders})
+       ORDER BY id DESC`,
       chunk,
     );
 
     for (const row of rows || []) {
       const email = getPathEmail(row);
-      if (!email || !row.id || map.has(email)) continue;
-      map.set(email, {
+      if (!email || !row.id) continue;
+      addCandidate(map, email, {
         id: row.id,
         name: row.name || "PATH",
         email,
@@ -153,8 +217,8 @@ export function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
   const pathOwnerByCandidateId = new Map();
 
   for (const owner of signiaUsers || []) {
-    const evaId = normalizeId(owner.evaId);
-    const pathId = normalizeId(owner.pathId);
+    const evaId = toId(owner.evaId);
+    const pathId = toId(owner.pathId);
     if (evaId && !evaOwnerByCandidateId.has(evaId)) evaOwnerByCandidateId.set(evaId, owner);
     if (pathId && !pathOwnerByCandidateId.has(pathId)) pathOwnerByCandidateId.set(pathId, owner);
   }
@@ -163,17 +227,15 @@ export function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
     const email = getSigniaEmail(user);
     if (!email) continue;
 
-    const evaCandidate = evaByEmail.get(email) || null;
-    const pathCandidate = pathByEmail.get(email) || null;
-    const missingEva = !user.evaId;
-    const missingPath = !user.pathId;
+    const evaCandidates = evaByEmail.get(email) || [];
+    const pathCandidates = pathByEmail.get(email) || [];
+    const missingEva = !hasLinkValue(user.evaId);
+    const missingPath = !hasLinkValue(user.pathId);
     const missingBoth = missingEva && missingPath;
-    const evaOwner = evaCandidate ? evaOwnerByCandidateId.get(normalizeId(evaCandidate.id)) : null;
-    const pathOwner = pathCandidate ? pathOwnerByCandidateId.get(normalizeId(pathCandidate.id)) : null;
-    const evaOwnedByOther = evaOwner && String(evaOwner.id) !== String(user.id);
-    const pathOwnedByOther = pathOwner && String(pathOwner.id) !== String(user.id);
-    const canSetEva = missingEva && Boolean(evaCandidate) && !evaOwnedByOther;
-    const canSetPath = missingPath && Boolean(pathCandidate) && !pathOwnedByOther;
+    const evaCandidate = missingEva ? selectAvailableCandidate(evaCandidates, evaOwnerByCandidateId, user) : null;
+    const pathCandidate = missingPath ? selectAvailableCandidate(pathCandidates, pathOwnerByCandidateId, user) : null;
+    const canSetEva = missingEva && Boolean(evaCandidate);
+    const canSetPath = missingPath && Boolean(pathCandidate);
 
     if (canSetEva) breakdown.eva += 1;
     if (canSetPath) breakdown.path += 1;
@@ -197,6 +259,10 @@ export function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
         targets: [canSetEva ? "eva" : null, canSetPath ? "path" : null].filter(Boolean),
         evaCandidate: canSetEva ? evaCandidate : null,
         pathCandidate: canSetPath ? pathCandidate : null,
+        duplicateCandidates: {
+          eva: Array.isArray(evaCandidates) ? evaCandidates.length : 0,
+          path: Array.isArray(pathCandidates) ? pathCandidates.length : 0,
+        },
       });
     }
   }

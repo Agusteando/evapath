@@ -11,8 +11,17 @@ const { authOptions } = require("../../lib/auth");
 
 function normalizeEmail(value) {
   return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function hasLinkValue(value) {
+  if (value === null || value === undefined) return false;
+  const normalized = String(value).trim();
+  return Boolean(normalized && normalized !== "0" && normalized.toLowerCase() !== "null" && normalized.toLowerCase() !== "undefined");
 }
 
 async function GET(req) {
@@ -94,8 +103,8 @@ async function GET(req) {
       return tB - tA;
     });
 
-    const evaMat = sigAll.filter((u) => u.evaId || u.evaMatch).length;
-    const pathMat = sigAll.filter((u) => u.pathId || u.pathMatch).length;
+    const evaMat = sigAll.filter((u) => hasLinkValue(u.evaId) || u.evaMatch).length;
+    const pathMat = sigAll.filter((u) => hasLinkValue(u.pathId) || u.pathMatch).length;
     const evaPct = sigAll.length
       ? ((evaMat / sigAll.length) * 100).toFixed(1)
       : "0.0";
@@ -106,7 +115,7 @@ async function GET(req) {
     let list = sigAll;
     const { searchParams } = new URL(req.url);
     if (searchParams.get("onlyMissing") === "1")
-      list = list.filter((u) => !(u.evaId && u.pathId));
+      list = list.filter((u) => !(hasLinkValue(u.evaId) && hasLinkValue(u.pathId)));
     const q = (searchParams.get("q") || "").toLowerCase();
     if (q)
       list = list.filter((u) => (u.name + u.email).toLowerCase().includes(q));

@@ -8,6 +8,7 @@ import {
 } from "../lib/designTokens";
 import { computeNameMatchScore } from "../lib/nameMatch";
 import { getEvaEmail, getPathEmail, getSigniaEmail } from "../lib/emailIdentity";
+import { hasLinkValue, normalizeLinkId } from "../lib/linkIdentity";
 
 export default function AutoSimilarity({
   signiaUsers,
@@ -36,7 +37,7 @@ export default function AutoSimilarity({
   // 1. Filter: Users missing EITHER Eva OR Path
   const usersToMatch = useMemo(() => {
     let list = (signiaUsers || []).filter(
-      (u) => (!u.evaId || !u.pathId) && !skippedIds.has(u.id),
+      (u) => (!hasLinkValue(u.evaId) || !hasLinkValue(u.pathId)) && !skippedIds.has(u.id),
     );
 
     // Search filter
@@ -64,8 +65,10 @@ export default function AutoSimilarity({
 
   const currentSignia = usersToMatch[currentIdx] || null;
   const currentSignature = currentSignia
-    ? `${currentSignia.id}:${currentSignia.evaId || ""}:${currentSignia.pathId || ""}`
+    ? `${currentSignia.id}:${normalizeLinkId(currentSignia.evaId) || ""}:${normalizeLinkId(currentSignia.pathId) || ""}`
     : "none";
+  const currentHasEva = hasLinkValue(currentSignia?.evaId);
+  const currentHasPath = hasLinkValue(currentSignia?.pathId);
 
   useEffect(() => {
     setShowSuccess(null);
@@ -76,7 +79,8 @@ export default function AutoSimilarity({
   const evaOwnerMap = useMemo(() => {
     const map = new Map();
     signiaUsers.forEach((u) => {
-      if (u.evaId) map.set(String(u.evaId), u);
+      const evaId = normalizeLinkId(u.evaId);
+      if (evaId) map.set(evaId, u);
     });
     return map;
   }, [signiaUsers]);
@@ -84,7 +88,8 @@ export default function AutoSimilarity({
   const pathOwnerMap = useMemo(() => {
     const map = new Map();
     signiaUsers.forEach((u) => {
-      if (u.pathId) map.set(String(u.pathId), u);
+      const pathId = normalizeLinkId(u.pathId);
+      if (pathId) map.set(pathId, u);
     });
     return map;
   }, [signiaUsers]);
@@ -107,7 +112,7 @@ export default function AutoSimilarity({
 
     // --- Match EVA ---
     let evaM = [];
-    if (!currentSignia.evaId) {
+    if (!hasLinkValue(currentSignia.evaId)) {
       evaM = evaUsers
         .map((source) => {
           const metrics = computeNameMatchScore(
@@ -129,7 +134,7 @@ export default function AutoSimilarity({
 
     // --- Match PATH ---
     let pathM = [];
-    if (!currentSignia.pathId) {
+    if (!hasLinkValue(currentSignia.pathId)) {
       pathM = pathUsers
         .map((source) => {
           const metrics = computeNameMatchScore(
@@ -375,24 +380,24 @@ export default function AutoSimilarity({
           <div className="space-y-3">
             {/* EVA Status */}
             <div
-              className={`flex justify-between items-center p-3 rounded-xl border-2 transition-colors ${currentSignia.evaId || showSuccess === "eva" ? "bg-indigo-50 border-indigo-200" : "bg-white border-dashed border-slate-200"}`}
+              className={`flex justify-between items-center p-3 rounded-xl border-2 transition-colors ${currentHasEva || showSuccess === "eva" ? "bg-indigo-50 border-indigo-200" : "bg-white border-dashed border-slate-200"}`}
             >
               <div className="flex items-center gap-3">
                 <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${currentSignia.evaId ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-500"}`}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${currentHasEva ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-500"}`}
                 >
                   E
                 </div>
                 <div>
                   <div className="font-bold text-slate-700 text-sm">EVA</div>
-                  {currentSignia.evaId && (
+                  {currentHasEva && (
                     <div className="text-[10px] text-slate-500">
                       ID: {currentSignia.evaId}
                     </div>
                   )}
                 </div>
               </div>
-              {currentSignia.evaId ? (
+              {currentHasEva ? (
                 <span className="text-indigo-600 font-bold text-xs">
                   ✓ LISTO
                 </span>
@@ -405,24 +410,24 @@ export default function AutoSimilarity({
 
             {/* PATH Status */}
             <div
-              className={`flex justify-between items-center p-3 rounded-xl border-2 transition-colors ${currentSignia.pathId || showSuccess === "path" ? "bg-emerald-50 border-emerald-200" : "bg-white border-dashed border-slate-200"}`}
+              className={`flex justify-between items-center p-3 rounded-xl border-2 transition-colors ${currentHasPath || showSuccess === "path" ? "bg-emerald-50 border-emerald-200" : "bg-white border-dashed border-slate-200"}`}
             >
               <div className="flex items-center gap-3">
                 <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${currentSignia.pathId ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-500"}`}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${currentHasPath ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-500"}`}
                 >
                   P
                 </div>
                 <div>
                   <div className="font-bold text-slate-700 text-sm">PATH</div>
-                  {currentSignia.pathId && (
+                  {currentHasPath && (
                     <div className="text-[10px] text-slate-500">
                       ID: {currentSignia.pathId}
                     </div>
                   )}
                 </div>
               </div>
-              {currentSignia.pathId ? (
+              {currentHasPath ? (
                 <span className="text-emerald-600 font-bold text-xs">
                   ✓ LISTO
                 </span>
@@ -444,7 +449,7 @@ export default function AutoSimilarity({
             </h3>
           </div>
 
-          {currentSignia.evaId ? (
+          {currentHasEva ? (
             <div className="h-40 flex items-center justify-center bg-indigo-50/50 border border-indigo-100 rounded-xl text-indigo-400 text-sm italic">
               ✓ EVA ya vinculado
             </div>
@@ -517,7 +522,7 @@ export default function AutoSimilarity({
             </h3>
           </div>
 
-          {currentSignia.pathId ? (
+          {currentHasPath ? (
             <div className="h-40 flex items-center justify-center bg-emerald-50/50 border border-emerald-100 rounded-xl text-emerald-400 text-sm italic">
               ✓ PATH ya vinculado
             </div>

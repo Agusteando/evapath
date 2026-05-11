@@ -1,9 +1,5 @@
-export function normalizeEmail(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
+import { normalizeEmail } from "./emailIdentity";
+import { hasLinkValue } from "./linkIdentity";
 
 export function isActiveSigniaUser(user = {}) {
   if (user.isActive === undefined || user.isActive === null) return true;
@@ -12,11 +8,11 @@ export function isActiveSigniaUser(user = {}) {
 }
 
 export function hasEvaLink(user) {
-  return Boolean(user?.hasEva || user?.evaId);
+  return Boolean(user?.hasEva || hasLinkValue(user?.evaId));
 }
 
 export function hasPathLink(user) {
-  return Boolean(user?.hasPath || user?.pathId);
+  return Boolean(user?.hasPath || hasLinkValue(user?.pathId));
 }
 
 export function getMissingLinkType(user) {

@@ -1,9 +1,28 @@
+const EMAIL_FIELD_NAMES = [
+  "email",
+  "correo",
+  "mail",
+  "Email",
+  "Correo",
+  "Mail",
+  "M",
+  "m",
+  "candidateEmail",
+  "CandidateEmail",
+];
+
 export function normalizeEmail(value) {
-  return String(value || "")
+  const raw = String(value || "")
     .normalize("NFKC")
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00A0/g, " ")
     .trim()
     .toLowerCase();
+
+  const bracketMatch = raw.match(/<([^<>\s]+@[^<>\s]+)>/);
+  const email = bracketMatch ? bracketMatch[1] : raw;
+
+  return email.replace(/\s+/g, "");
 }
 
 export function emailsEqual(a, b) {
@@ -21,15 +40,19 @@ function firstEmail(record = {}, fields = []) {
 }
 
 export function getSigniaEmail(user = {}) {
-  return firstEmail(user, ["email", "correo", "mail", "Email", "Correo", "M"]);
+  return firstEmail(user, ["email", "correo", "mail", "Email", "Correo", "M", "m"]);
 }
 
 export function getEvaEmail(user = {}) {
-  return firstEmail(user, ["correo", "M", "email", "Email", "Correo", "mail"]);
+  return firstEmail(user, ["correo", "M", "m", "email", "Email", "Correo", "mail", "Mail"]);
 }
 
 export function getPathEmail(user = {}) {
-  return firstEmail(user, ["email", "correo", "Email", "Correo", "mail", "M"]);
+  return firstEmail(user, ["email", "correo", "Email", "Correo", "mail", "Mail", "M", "m"]);
+}
+
+export function getAnyRecordEmail(record = {}) {
+  return firstEmail(record, EMAIL_FIELD_NAMES);
 }
 
 export function hasExactEmailMatch(left = {}, right = {}, leftGetter = getSigniaEmail, rightGetter = getPathEmail) {
