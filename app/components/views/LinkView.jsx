@@ -2,7 +2,11 @@
 import { useState, useEffect } from "react";
 import Linker from "../Linker";
 
-export default function LinkView({ setView, initialFilter = "missing" }) {
+export default function LinkView({
+  setView,
+  initialFilter = "missing",
+  initialSearch = "",
+}) {
   const [asociar, setAsociar] = useState([]);
   const [loading, setLoading] = useState(true);
   const [idx, setIdx] = useState(0);
@@ -53,6 +57,7 @@ export default function LinkView({ setView, initialFilter = "missing" }) {
         setIdx={setIdx}
         setLinkMode={() => setView("vinculacion")}
         initialFilter={initialFilter}
+        initialSearch={initialSearch}
       />
     </div>
   );

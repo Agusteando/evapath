@@ -34,6 +34,8 @@ export function getVinculacionStats(users = []) {
       if (withoutEva) acc.withoutEva += 1;
       if (withoutPath) acc.withoutPath += 1;
       if (withoutEva && withoutPath) acc.withoutBoth += 1;
+      if (!withoutEva) acc.withEva += 1;
+      if (!withoutPath) acc.withPath += 1;
       if (!withoutEva && !withoutPath) acc.complete += 1;
 
       return acc;
@@ -43,6 +45,8 @@ export function getVinculacionStats(users = []) {
       withoutEva: 0,
       withoutPath: 0,
       withoutBoth: 0,
+      withEva: 0,
+      withPath: 0,
       complete: 0,
     },
   );

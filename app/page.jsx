@@ -15,14 +15,19 @@ export default function Dashboard() {
   const { data: session, status } = useSession();
   const [activeView, setActiveView] = useState("recents");
   const [linkInitialFilter, setLinkInitialFilter] = useState("missing");
+  const [linkInitialSearch, setLinkInitialSearch] = useState("");
 
   function handleSelectView(view) {
-    if (view === "link") setLinkInitialFilter("missing");
+    if (view === "link") {
+      setLinkInitialFilter("missing");
+      setLinkInitialSearch("");
+    }
     setActiveView(view);
   }
 
-  function openManualLinker(filter = "missing") {
+  function openManualLinker(filter = "missing", search = "") {
     setLinkInitialFilter(filter);
+    setLinkInitialSearch(search);
     setActiveView("link");
   }
 
@@ -108,7 +113,11 @@ export default function Dashboard() {
           />
         )}
         {activeView === "link" && (
-          <LinkView setView={setActiveView} initialFilter={linkInitialFilter} />
+          <LinkView
+            setView={setActiveView}
+            initialFilter={linkInitialFilter}
+            initialSearch={linkInitialSearch}
+          />
         )}
         {activeView === "auto" && <AutoMatchView setView={setActiveView} />}
         {activeView === "audit" && <AuditView />}

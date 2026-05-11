@@ -34,6 +34,7 @@ export default function Linker({
   setLinkMode,
   setAsociar,
   initialFilter = "missing",
+  initialSearch = "",
 }) {
   const [filters, setFilters] = useState("missing");
   const [searchTerm, setSearchTerm] = useState("");
@@ -123,8 +124,9 @@ export default function Linker({
 
   useEffect(() => {
     setFilters(initialFilter || "missing");
+    setSearchTerm(initialSearch || "");
     setIdx(0);
-  }, [initialFilter, setIdx]);
+  }, [initialFilter, initialSearch, setIdx]);
 
   useEffect(() => {
     const handleKeyDown = async (e) => {
