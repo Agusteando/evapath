@@ -10,7 +10,10 @@ export async function GET(req, context) {
   try {
     await waitEva(5000);
   } catch (err) {
-    return NextResponse.json({ error: "EVA service not ready", details: err?.message }, { status: 503 });
+    return NextResponse.json(
+      { error: "EVA service not ready", details: err?.message },
+      { status: 503 },
+    );
   }
 
   const eva = getEva();
@@ -18,13 +21,19 @@ export async function GET(req, context) {
   try {
     evaUsers = eva.getUsers();
   } catch (err) {
-    return NextResponse.json({ error: "Failed to obtain EVA users", details: err?.message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to obtain EVA users", details: err?.message },
+      { status: 500 },
+    );
   }
 
   const { searchParams } = new URL(req.url);
   const rawTerm = searchParams.get("q") || "";
   const term = rawTerm.toLowerCase();
-  let exclude = (searchParams.get("exclude") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  let exclude = (searchParams.get("exclude") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (exclude.length) {
     const excludeSet = new Set(exclude.map(String));
@@ -32,8 +41,23 @@ export async function GET(req, context) {
   }
 
   if (term) {
-    evaUsers = evaUsers.filter((u) => (u.nombre || "").toLowerCase().includes(term) || (u.puesto || "").toLowerCase().includes(term) || (u.correo || "").toLowerCase().includes(term));
+    evaUsers = evaUsers.filter(
+      (u) =>
+        (u.nombre || "").toLowerCase().includes(term) ||
+        (u.puesto || "").toLowerCase().includes(term) ||
+        (u.correo || "").toLowerCase().includes(term),
+    );
   }
 
-  return NextResponse.json(evaUsers.slice(0, 20).map((u) => ({ cid: u.CID, label: u.nombre ?? "", name: u.nombre ?? "", puesto: u.puesto ?? "" })));
+  return NextResponse.json(
+    evaUsers
+      .slice(0, 20)
+      .map((u) => ({
+        cid: u.CID,
+        label: u.nombre ?? "",
+        name: u.nombre ?? "",
+        email: u.correo ?? "",
+        puesto: u.puesto ?? "",
+      })),
+  );
 }

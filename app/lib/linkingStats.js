@@ -1,0 +1,60 @@
+export function normalizeEmail(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+export function hasEvaLink(user) {
+  return Boolean(user?.hasEva || user?.evaId || user?.evaMatch);
+}
+
+export function hasPathLink(user) {
+  return Boolean(user?.hasPath || user?.pathId || user?.pathMatch);
+}
+
+export function getMissingLinkType(user) {
+  const withoutEva = !hasEvaLink(user);
+  const withoutPath = !hasPathLink(user);
+
+  if (withoutEva && withoutPath) return "both";
+  if (withoutEva) return "eva";
+  if (withoutPath) return "path";
+  return "complete";
+}
+
+export function getVinculacionStats(users = []) {
+  const base = Array.isArray(users) ? users : [];
+
+  return base.reduce(
+    (acc, user) => {
+      const withoutEva = !hasEvaLink(user);
+      const withoutPath = !hasPathLink(user);
+
+      acc.total += 1;
+      if (withoutEva) acc.withoutEva += 1;
+      if (withoutPath) acc.withoutPath += 1;
+      if (withoutEva && withoutPath) acc.withoutBoth += 1;
+      if (!withoutEva && !withoutPath) acc.complete += 1;
+
+      return acc;
+    },
+    {
+      total: 0,
+      withoutEva: 0,
+      withoutPath: 0,
+      withoutBoth: 0,
+      complete: 0,
+    },
+  );
+}
+
+export function getPrimarySearchValue(user = {}) {
+  return (
+    normalizeEmail(user.email) ||
+    user.fullName ||
+    user.name ||
+    [user.nombres, user.apellidoPaterno, user.apellidoMaterno]
+      .filter(Boolean)
+      .join(" ")
+  ).trim();
+}

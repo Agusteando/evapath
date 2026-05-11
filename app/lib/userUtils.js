@@ -1,4 +1,3 @@
-
 /**
  * Canonical empty names object used by Linker when initializing
  * or resetting the editable name fields.
@@ -32,6 +31,8 @@ export function isUserMissingAny(u) {
  * - "missing": any missing EVA / PATH / CURP / ECO / MMPI or name fields
  * - "nombres": only those with missing or incomplete names
  * - "eva": users without EVA association
+ * - "path": users without PATH association
+ * - "both": users without EVA and PATH association
  * - "eco": users without ECO/MMPI results
  * - "all": no missing-based filter (return all users)
  */
@@ -41,10 +42,14 @@ export function filterByMissingCategory(users, filter) {
       return users.filter(isUserMissingAny);
     case "nombres":
       return users.filter(
-        (u) => u.missingNombres || u.missingApellido || u.missingNames
+        (u) => u.missingNombres || u.missingApellido || u.missingNames,
       );
     case "eva":
       return users.filter((u) => !u.hasEva);
+    case "path":
+      return users.filter((u) => !u.hasPath);
+    case "both":
+      return users.filter((u) => !u.hasEva && !u.hasPath);
     case "eco":
       return users.filter((u) => !u.hasEco || !u.hasMmpi);
     case "all":
@@ -65,11 +70,7 @@ export function filterByMissingCategory(users, filter) {
  */
 export function filterLinkerUsers(
   users,
-  {
-    categoryFilter = "missing",
-    searchTerm = "",
-    plantelId = "",
-  } = {}
+  { categoryFilter = "missing", searchTerm = "", plantelId = "" } = {},
 ) {
   // 1) Base filter: missing category
   const base = filterByMissingCategory(users, categoryFilter);
