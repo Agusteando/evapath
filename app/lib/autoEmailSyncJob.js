@@ -1,5 +1,4 @@
-import { getPathPool, logAudit } from "../api/shared.js";
-import { applyEmailOpportunity } from "./bulkEmailSync.js";
+import { getPathPool, logAudit } from "./serverDb.js";
 
 export const AUTO_EMAIL_SYNC_JOB_NAME = "auto_email_match";
 export const AUTO_EMAIL_SYNC_INTERVAL_MS = Number(
@@ -140,6 +139,7 @@ export async function runAutoEmailSync({ force = false } = {}) {
   });
 
   try {
+    const { applyEmailOpportunity } = await import("./bulkEmailSync.js");
     const result = await applyEmailOpportunity({
       waitForEva: true,
       evaTimeoutMs: EVA_WAIT_TIMEOUT_MS,

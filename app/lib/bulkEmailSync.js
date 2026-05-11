@@ -1,4 +1,4 @@
-import { getSigniaPool, getPathPool, waitEva, getEva } from "../api/shared.js";
+import { getSigniaPool, getPathPool } from "./serverDb.js";
 
 export function normalizeEmail(value) {
   return String(value || "")
@@ -34,7 +34,22 @@ export async function getSigniaUsers(signiaDB) {
 }
 
 export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 } = {}) {
-  const eva = getEva();
+  let eva;
+  let waitEva;
+
+  try {
+    const shared = await import("../api/shared.js");
+    eva = shared.getEva();
+    waitEva = shared.waitEva;
+  } catch (error) {
+    return {
+      map: new Map(),
+      ready: false,
+      status: "error",
+      error: error?.message || "No se pudo inicializar EVA",
+    };
+  }
+
   let waitError = null;
 
   if (waitForReady && !eva.ready) {
