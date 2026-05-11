@@ -251,14 +251,19 @@ function SummaryPendingCard({ title, count, users, actionLabel, onOpen }) {
   );
 }
 
+function formatCandidateTarget(label, candidate) {
+  if (!candidate) return null;
+  const score = candidate.score ? ` · ${candidate.score}%` : "";
+  const name = candidate.name ? ` · ${candidate.name}` : "";
+  return `${label} #${candidate.id}${score}${name}`;
+}
+
 function MatchTargetSummary({ match }) {
   const parts = [];
-  if (match.evaCandidate) {
-    parts.push(`EVA #${match.evaCandidate.id}`);
-  }
-  if (match.pathCandidate) {
-    parts.push(`PATH #${match.pathCandidate.id}`);
-  }
+  const eva = formatCandidateTarget("EVA", match.evaCandidate);
+  const path = formatCandidateTarget("PATH", match.pathCandidate);
+  if (eva) parts.push(eva);
+  if (path) parts.push(path);
   return parts.join(" · ") || "—";
 }
 
@@ -465,6 +470,217 @@ function EmailMatchPanel({
   );
 }
 
+
+function NameMatchPanel({
+  preview,
+  loading,
+  error,
+  selectedIds,
+  setSelectedIds,
+  syncing,
+  result,
+  onApplySelected,
+  onReview,
+  onReviewUser,
+}) {
+  const matches = Array.isArray(preview?.matches) ? preview.matches : [];
+  const selectedCount = selectedIds.size;
+  const minScore = preview?.minScore || 95;
+  const evaNameCount = preview?.evaReady === false ? null : preview?.evaSet ?? 0;
+  const bothNameCount = preview?.evaReady === false ? null : preview?.bothSet ?? 0;
+  const breakdown = preview?.breakdown || {};
+
+  function toggleSelected(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set(matches.map((match) => String(match.signiaId))));
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-black uppercase tracking-wide text-slate-900">
+              Coincidencias por nombre {minScore}%+
+            </h2>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <StatChip label="Sin EVA → EVA" value={evaNameCount} />
+              <StatChip label="Sin PATH → PATH" value={preview?.pathSet ?? 0} />
+              <StatChip
+                label="Sin ambos → EVA + PATH"
+                value={bothNameCount}
+                emphasis
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <button
+              type="button"
+              onClick={onApplySelected}
+              disabled={loading || syncing || selectedCount === 0}
+              className={classNames(BTN_BASE, BTN_SIZES.md, BTN_VARIANTS.primary)}
+            >
+              {syncing && (
+                <svg className={SPINNER} viewBox="0 0 24 24" fill="none">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"
+                    fill="currentColor"
+                  />
+                </svg>
+              )}
+              Aceptar seleccionadas ({formatCount(selectedCount)})
+            </button>
+            <button
+              type="button"
+              onClick={onReview}
+              disabled={loading}
+              className={classNames(BTN_BASE, BTN_SIZES.md, BTN_VARIANTS.secondary)}
+            >
+              Abrir Auto-Similitud
+            </button>
+          </div>
+        </div>
+
+        {preview?.evaReady === false && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            EVA está en estado {preview.evaStatus || "desconocido"}; las coincidencias EVA por nombre pueden estar incompletas.
+          </div>
+        )}
+        {error && (
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+            {error}
+          </div>
+        )}
+        {result && (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+            {result}
+          </div>
+        )}
+      </div>
+
+      <div className="p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-bold text-slate-700">
+            {loading
+              ? "Calculando coincidencias por nombre..."
+              : `${formatCount(matches.length)} registros listos por nombre`}
+          </div>
+          {!loading && (
+            <div className="text-xs font-semibold text-slate-500">
+              Sin ambos con EVA: {formatCount(preview?.evaReady === false ? null : breakdown.missingBothWithEva ?? 0)} · Sin ambos con PATH: {formatCount(breakdown.missingBothWithPath ?? 0)}
+            </div>
+          )}
+          {!!matches.length && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={selectAll}
+                className="text-xs font-bold text-blue-700 hover:text-blue-800"
+              >
+                Seleccionar todo
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-xs font-bold text-slate-500 hover:text-slate-700"
+              >
+                Limpiar selección
+              </button>
+            </div>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-500">
+            Calculando nombres en EVA y PATH...
+          </div>
+        ) : matches.length ? (
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="max-h-[420px] overflow-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-left text-[11px] font-black uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="w-10 px-3 py-3" />
+                    <th className="px-3 py-3">Nombre Signia</th>
+                    <th className="px-3 py-3">Email</th>
+                    <th className="px-3 py-3">Estado actual</th>
+                    <th className="px-3 py-3">Coincidencia encontrada</th>
+                    <th className="px-3 py-3 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {matches.map((match, index) => {
+                    const id = String(match.signiaId);
+                    return (
+                      <tr key={`name-match-${id}-${match.targets?.join("-") || "target"}-${index}`} className="hover:bg-slate-50">
+                        <td className="px-3 py-3 align-top">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(id)}
+                            onChange={() => toggleSelected(id)}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            aria-label={`Seleccionar ${match.name}`}
+                          />
+                        </td>
+                        <td className="px-3 py-3 align-top font-semibold text-slate-900">
+                          {match.name || "Sin nombre"}
+                        </td>
+                        <td className="px-3 py-3 align-top text-slate-600">
+                          {match.email || "—"}
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-amber-100">
+                            {match.currentStatus || "Pendiente"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 align-top text-slate-700">
+                          {MatchTargetSummary({ match })}
+                        </td>
+                        <td className="px-3 py-3 align-top text-right">
+                          <button
+                            type="button"
+                            onClick={() => onReviewUser(match)}
+                            className="text-xs font-bold text-blue-700 hover:text-blue-800"
+                          >
+                            Revisar
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <EmptyList label="No hay coincidencias por nombre 95%+ listas para aplicar" />
+        )}
+      </div>
+    </section>
+  );
+}
+
 function PendingTable({ title, users, actionLabel, onAction, motive }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -646,6 +862,12 @@ export default function VinculacionView({ openManual, openAuto }) {
   const [bulkError, setBulkError] = useState("");
   const [bulkResult, setBulkResult] = useState("");
   const [selectedMatchIds, setSelectedMatchIds] = useState(() => new Set());
+  const [namePreview, setNamePreview] = useState(null);
+  const [nameLoading, setNameLoading] = useState(true);
+  const [nameSyncing, setNameSyncing] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const [nameResult, setNameResult] = useState("");
+  const [selectedNameMatchIds, setSelectedNameMatchIds] = useState(() => new Set());
   const [autoSyncStatus, setAutoSyncStatus] = useState(null);
   const [autoSyncLoading, setAutoSyncLoading] = useState(true);
   const [autoSyncError, setAutoSyncError] = useState("");
@@ -660,7 +882,12 @@ export default function VinculacionView({ openManual, openAuto }) {
   );
   const unresolvedLinkCount = Math.max(
     0,
-    stats.withoutEva + stats.withoutPath - (bulkPreview?.evaSet || 0) - (bulkPreview?.pathSet || 0),
+    stats.withoutEva +
+      stats.withoutPath -
+      (bulkPreview?.evaSet || 0) -
+      (bulkPreview?.pathSet || 0) -
+      (namePreview?.evaSet || 0) -
+      (namePreview?.pathSet || 0),
   );
 
   async function fetchSummary({ silent = false } = {}) {
@@ -696,6 +923,25 @@ export default function VinculacionView({ openManual, openAuto }) {
       setSelectedMatchIds(new Set());
     } finally {
       setBulkLoading(false);
+    }
+  }
+
+  async function fetchNamePreview() {
+    setNameLoading(true);
+    setNameError("");
+    try {
+      const response = await fetch("/api/bulk-name-sync");
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "No se pudo calcular la coincidencia por nombre.");
+      }
+      setNamePreview(data);
+      setSelectedNameMatchIds(new Set((data.matches || []).map((match) => String(match.signiaId))));
+    } catch (error) {
+      setNameError(error?.message || "No se pudo calcular la coincidencia por nombre.");
+      setSelectedNameMatchIds(new Set());
+    } finally {
+      setNameLoading(false);
     }
   }
 
@@ -735,11 +981,45 @@ export default function VinculacionView({ openManual, openAuto }) {
       setBulkResult(
         `${formatCount(data.records || data.usersUpdated || 0)} usuarios actualizados por coincidencia directa.`,
       );
-      await Promise.all([fetchSummary({ silent: true }), fetchBulkPreview()]);
+      await Promise.all([
+        fetchSummary({ silent: true }),
+        fetchBulkPreview(),
+        fetchNamePreview(),
+      ]);
     } catch (error) {
       setBulkError(error?.message || "No se pudieron aplicar las coincidencias por email.");
     } finally {
       setBulkSyncing(false);
+    }
+  }
+
+  async function applySelectedNameSync() {
+    if (!selectedNameMatchIds.size) return;
+    setNameSyncing(true);
+    setNameError("");
+    setNameResult("");
+    try {
+      const response = await fetch("/api/bulk-name-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signiaIds: Array.from(selectedNameMatchIds) }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "No se pudieron aplicar las coincidencias por nombre.");
+      }
+      setNameResult(
+        `${formatCount(data.records || data.usersUpdated || 0)} usuarios actualizados por coincidencia de nombre ${data.minScore || 95}%+.`,
+      );
+      await Promise.all([
+        fetchSummary({ silent: true }),
+        fetchBulkPreview(),
+        fetchNamePreview(),
+      ]);
+    } catch (error) {
+      setNameError(error?.message || "No se pudieron aplicar las coincidencias por nombre.");
+    } finally {
+      setNameSyncing(false);
     }
   }
 
@@ -755,6 +1035,7 @@ export default function VinculacionView({ openManual, openAuto }) {
   useEffect(() => {
     fetchSummary();
     fetchBulkPreview();
+    fetchNamePreview();
     fetchAutoSyncStatus();
   }, []);
 
@@ -785,7 +1066,7 @@ export default function VinculacionView({ openManual, openAuto }) {
                 Resumen EVA / PATH
               </h1>
             </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-10">
               <StatChip label="Total Signia" value={stats.total} emphasis />
               <StatChip label="Vinculados EVA" value={stats.withEva} />
               <StatChip label="Vinculados PATH" value={stats.withPath} />
@@ -797,6 +1078,11 @@ export default function VinculacionView({ openManual, openAuto }) {
                 value={bulkPreview?.evaReady === false ? null : bulkPreview?.evaSet ?? 0}
               />
               <StatChip label="Email PATH" value={bulkPreview?.pathSet ?? 0} />
+              <StatChip
+                label="Nombre EVA"
+                value={namePreview?.evaReady === false ? null : namePreview?.evaSet ?? 0}
+              />
+              <StatChip label="Nombre PATH" value={namePreview?.pathSet ?? 0} />
             </div>
           </div>
         </header>
@@ -852,6 +1138,19 @@ export default function VinculacionView({ openManual, openAuto }) {
           syncing={bulkSyncing}
           onApplySelected={applySelectedBulkSync}
           onReview={() => openManual("missing")}
+          onReviewUser={openManualForMatch}
+        />
+
+        <NameMatchPanel
+          preview={namePreview}
+          loading={nameLoading}
+          error={nameError}
+          selectedIds={selectedNameMatchIds}
+          setSelectedIds={setSelectedNameMatchIds}
+          syncing={nameSyncing}
+          result={nameResult}
+          onApplySelected={applySelectedNameSync}
+          onReview={openAuto}
           onReviewUser={openManualForMatch}
         />
 

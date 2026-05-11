@@ -57,7 +57,19 @@ export default function AutoSimilarity({
     }
   }, [usersToMatch.length, currentIdx]);
 
+  useEffect(() => {
+    setCurrentIdx(0);
+  }, [searchTerm]);
+
   const currentSignia = usersToMatch[currentIdx] || null;
+  const currentSignature = currentSignia
+    ? `${currentSignia.id}:${currentSignia.evaId || ""}:${currentSignia.pathId || ""}`
+    : "none";
+
+  useEffect(() => {
+    setShowSuccess(null);
+    setActionError("");
+  }, [currentSignature]);
 
   // 2. Map existing owners for "Taken" check
   const evaOwnerMap = useMemo(() => {
@@ -109,7 +121,7 @@ export default function AutoSimilarity({
             takenBy: evaOwnerMap.get(String(source.CID)),
           };
         })
-        .filter((m) => m.viable)
+        .filter((m) => m.viable && (!m.takenBy || m.takenBy.id === currentSignia.id))
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
     }
@@ -131,7 +143,7 @@ export default function AutoSimilarity({
             takenBy: pathOwnerMap.get(String(source.id)),
           };
         })
-        .filter((m) => m.viable)
+        .filter((m) => m.viable && (!m.takenBy || m.takenBy.id === currentSignia.id))
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
     }
@@ -442,7 +454,7 @@ export default function AutoSimilarity({
           ) : (
             evaMatches.map((m, i) => (
               <div
-                key={m.source.CID}
+                key={`eva-${currentSignature}-${m.source.CID}-${i}`}
                 className={`relative bg-white border p-3 rounded-xl shadow-sm hover:shadow-md transition-all group ${m.score > 90 ? "border-indigo-300 ring-1 ring-indigo-50" : "border-slate-200"}`}
               >
                 <div className="absolute -left-2 top-3 w-5 h-5 bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-[10px] font-bold flex items-center justify-center">
@@ -515,7 +527,7 @@ export default function AutoSimilarity({
           ) : (
             pathMatches.map((m, i) => (
               <div
-                key={m.source.id}
+                key={`path-${currentSignature}-${m.source.id}-${i}`}
                 className={`relative bg-white border p-3 rounded-xl shadow-sm hover:shadow-md transition-all group ${m.score > 90 ? "border-emerald-300 ring-1 ring-emerald-50" : "border-slate-200"}`}
               >
                 <div className="absolute -left-2 top-3 w-5 h-5 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[10px] font-bold flex items-center justify-center">
