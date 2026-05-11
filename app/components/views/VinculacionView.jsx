@@ -47,6 +47,43 @@ function formatCount(value) {
   return Number(value || 0).toLocaleString("es-MX");
 }
 
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("es-MX", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatTimeUntil(value, nowValue) {
+  if (!value) return "—";
+  const target = new Date(value).getTime();
+  const now = nowValue instanceof Date ? nowValue.getTime() : Date.now();
+  if (Number.isNaN(target)) return "—";
+
+  const diffMs = target - now;
+  if (diffMs <= 0) return "Ahora";
+
+  const totalMinutes = Math.ceil(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours <= 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
+
+function getAutoSyncStatusLabel(status) {
+  if (!status) return "Sin leer";
+  if (!status.enabled) return "Desactivado";
+  if (status.running || status.status === "running") return "Ejecutando";
+  if (status.lastSuccess === true) return "Última corrida OK";
+  if (status.lastSuccess === false) return "Última corrida con error";
+  return "Pendiente";
+}
+
 function getDisplayName(user = {}) {
   return (
     user.fullName ||
@@ -106,6 +143,46 @@ function StatChip({ label, value, emphasis = false }) {
       </div>
       <div className="mt-1 text-2xl font-black tabular-nums text-slate-950">
         {formatCount(value)}
+      </div>
+    </div>
+  );
+}
+
+function AutoSyncStatusBar({ status, loading, error, now }) {
+  const statusLabel = error
+    ? "No disponible"
+    : loading && !status
+      ? "Cargando"
+      : getAutoSyncStatusLabel(status);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+            Auto email-match
+          </div>
+          <div className="mt-1 text-sm font-semibold text-slate-700">
+            Próximo auto: {formatTimeUntil(status?.nextRunAt, now)}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 lg:min-w-[520px]">
+          <div className="rounded-lg bg-slate-50 px-3 py-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Última ejecución</span>
+            <div className="font-bold text-slate-900">{formatDateTime(status?.lastExecutedAt)}</div>
+          </div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Estado</span>
+            <div
+              className={classNames(
+                "font-bold",
+                error || status?.lastSuccess === false ? "text-rose-700" : "text-slate-900",
+              )}
+            >
+              {statusLabel}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -569,6 +646,10 @@ export default function VinculacionView({ openManual, openAuto }) {
   const [bulkError, setBulkError] = useState("");
   const [bulkResult, setBulkResult] = useState("");
   const [selectedMatchIds, setSelectedMatchIds] = useState(() => new Set());
+  const [autoSyncStatus, setAutoSyncStatus] = useState(null);
+  const [autoSyncLoading, setAutoSyncLoading] = useState(true);
+  const [autoSyncError, setAutoSyncError] = useState("");
+  const [now, setNow] = useState(() => new Date());
 
   const stats = useMemo(() => getVinculacionStats(users), [users]);
   const missingEva = useMemo(() => users.filter((user) => !hasEvaLink(user)), [users]);
@@ -618,6 +699,24 @@ export default function VinculacionView({ openManual, openAuto }) {
     }
   }
 
+  async function fetchAutoSyncStatus({ silent = false } = {}) {
+    if (!silent) setAutoSyncLoading(true);
+    setAutoSyncError("");
+    try {
+      const response = await fetch("/api/auto-email-sync/status", { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "No se pudo leer el estado del auto email-match.");
+      }
+      setAutoSyncStatus(data);
+      setNow(new Date(data.serverNow || Date.now()));
+    } catch (error) {
+      setAutoSyncError(error?.message || "No se pudo leer el estado del auto email-match.");
+    } finally {
+      if (!silent) setAutoSyncLoading(false);
+    }
+  }
+
   async function applySelectedBulkSync() {
     if (!selectedMatchIds.size) return;
     setBulkSyncing(true);
@@ -656,6 +755,19 @@ export default function VinculacionView({ openManual, openAuto }) {
   useEffect(() => {
     fetchSummary();
     fetchBulkPreview();
+    fetchAutoSyncStatus();
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      fetchAutoSyncStatus({ silent: true });
+    }, 60000);
+    return () => clearInterval(timer);
   }, []);
 
   if (loading) return <LoadingState />;
@@ -688,6 +800,13 @@ export default function VinculacionView({ openManual, openAuto }) {
             </div>
           </div>
         </header>
+
+        <AutoSyncStatusBar
+          status={autoSyncStatus}
+          loading={autoSyncLoading}
+          error={autoSyncError}
+          now={now}
+        />
 
         {loadError && (
           <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
