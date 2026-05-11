@@ -1,6 +1,6 @@
 # Auto email-match sync
 
-EvaPath starts a server-side job when the Next.js server boots. The job checks every 2 hours for pending Signia users that can be linked by direct email match and applies those links automatically.
+EvaPath starts the server-side job from the node-only auto email sync API/status route. This avoids loading EVA/Puppeteer from Next.js instrumentation while still keeping one scheduler alive in a persistent Node server process after the app is accessed. The job checks every 2 hours for pending Signia users that can be linked by direct email match and applies those links automatically.
 
 Behavior:
 
