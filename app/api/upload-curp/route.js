@@ -30,6 +30,11 @@ async function POST(req) {
   const filePath = "/uploads/curp/" + fname;
 
   const signiaDB = await getSigniaPool();
+  const [activeRows] = await signiaDB.query("SELECT id FROM user WHERE id=? AND isActive=1 LIMIT 1", [userId]);
+  if (!activeRows.length) {
+    return NextResponse.json({ error: "Usuario Signia no encontrado o inactivo" }, { status: 404 });
+  }
+
   await signiaDB.query("DELETE FROM documents WHERE userId=? AND type='CURP'", [userId]);
   await signiaDB.query("INSERT INTO documents (id, userId, type, status, filePath, version) VALUES (?, ?, ?, ?, ?, ?)", [String(Date.now()) + "-" + userId, userId, "CURP", "PENDING", filePath, 1]);
 

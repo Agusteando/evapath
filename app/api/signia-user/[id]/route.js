@@ -9,7 +9,7 @@ async function GET(_req, context) {
 
   const params = await context.params;
   const signiaDB = await getSigniaPool();
-  const [r] = await signiaDB.query("SELECT id,email,name,evaId,pathId FROM user WHERE id=?", [params.id]);
+  const [r] = await signiaDB.query("SELECT id,email,name,evaId,pathId FROM user WHERE id=? AND isActive=1", [params.id]);
   if (!r.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(r[0]);
 }

@@ -28,7 +28,7 @@ async function GET(req) {
   const signiaDB = await getSigniaPool();
   let sig = [];
   if (emails.length) {
-    sig = (await signiaDB.query(`SELECT id,email,name FROM user WHERE email IN (${emails.map(() => "?").join(",")})`, emails))[0];
+    sig = (await signiaDB.query(`SELECT id,email,name FROM user WHERE isActive=1 AND email IN (${emails.map(() => "?").join(",")})`, emails))[0];
   }
   const sigMap = Object.fromEntries(sig.map(r => [r.email, r]));
   evaUsers.forEach(u => {

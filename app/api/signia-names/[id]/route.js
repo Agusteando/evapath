@@ -20,12 +20,17 @@ async function PATCH(req, context) {
   // Get existing user email for complete audit context
   let userEmail = "";
   try {
-    const [rows] = await signiaDB.query("SELECT email FROM user WHERE id=?", [id]);
-    if (rows.length) userEmail = rows[0].email;
-  } catch(e) {}
+    const [rows] = await signiaDB.query("SELECT email FROM user WHERE id=? AND isActive=1", [id]);
+    if (!rows.length) {
+      return NextResponse.json({ error: "Usuario Signia no encontrado o inactivo" }, { status: 404 });
+    }
+    userEmail = rows[0].email;
+  } catch(e) {
+    return NextResponse.json({ error: "No se pudo validar el usuario Signia activo" }, { status: 500 });
+  }
 
   await signiaDB.query(
-    "UPDATE user SET nombres=?, apellidoPaterno=?, apellidoMaterno=? WHERE id=?",
+    "UPDATE user SET nombres=?, apellidoPaterno=?, apellidoMaterno=? WHERE id=? AND isActive=1",
     [nombres, apellidoPaterno, apellidoMaterno, id]
   );
 

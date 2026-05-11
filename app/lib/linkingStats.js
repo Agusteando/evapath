@@ -4,6 +4,13 @@ export function normalizeEmail(value) {
     .toLowerCase();
 }
 
+
+export function isActiveSigniaUser(user = {}) {
+  if (user.isActive === undefined || user.isActive === null) return true;
+  if (user.isActive === true) return true;
+  return String(user.isActive).trim() === "1";
+}
+
 export function hasEvaLink(user) {
   return Boolean(user?.hasEva || user?.evaId);
 }
@@ -23,7 +30,7 @@ export function getMissingLinkType(user) {
 }
 
 export function getVinculacionStats(users = []) {
-  const base = Array.isArray(users) ? users : [];
+  const base = (Array.isArray(users) ? users : []).filter(isActiveSigniaUser);
 
   return base.reduce(
     (acc, user) => {

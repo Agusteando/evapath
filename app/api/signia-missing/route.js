@@ -19,7 +19,7 @@ async function GET(req, context) {
     const pathDB = await getPathPool();
 
     const [userRows] = await signiaDB.query(
-      `SELECT u.id, u.nombres, u.apellidoPaterno, u.apellidoMaterno, u.name, u.email, u.evaId, u.pathId, u.plantelId, p.name AS plantelName, p.label AS plantelLabel, d.filePath AS curpPath, d.status AS curpStatus FROM user u LEFT JOIN document d ON d.userId = u.id AND d.type = 'CURP' LEFT JOIN plantel p ON p.id = u.plantelId ORDER BY u.nombres, u.apellidoPaterno, u.apellidoMaterno`,
+      `SELECT u.id, u.nombres, u.apellidoPaterno, u.apellidoMaterno, u.name, u.email, u.evaId, u.pathId, u.plantelId, p.name AS plantelName, p.label AS plantelLabel, d.filePath AS curpPath, d.status AS curpStatus FROM user u LEFT JOIN document d ON d.userId = u.id AND d.type = 'CURP' LEFT JOIN plantel p ON p.id = u.plantelId WHERE u.isActive=1 ORDER BY u.nombres, u.apellidoPaterno, u.apellidoMaterno`,
     );
 
     const usersById = new Map();

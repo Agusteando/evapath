@@ -26,7 +26,7 @@ export async function GET(req) {
     let linkedSet = new Set();
     if (ids.length) {
       const [linked] = await signiaDB.query(
-        `SELECT pathId FROM user WHERE pathId IN (${ids.map(() => "?").join(",")})`,
+        `SELECT pathId FROM user WHERE isActive=1 AND pathId IN (${ids.map(() => "?").join(",")})`,
         ids,
       );
       linkedSet = new Set(linked.map((r) => r.pathId));

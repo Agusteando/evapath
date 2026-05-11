@@ -68,7 +68,7 @@ export async function getSigniaUser(signiaId) {
 
   const db = await getSigniaPool();
   const [rows] = await db.query(
-    "SELECT id,email,name,evaId,pathId FROM user WHERE id=? LIMIT 1",
+    "SELECT id,email,name,evaId,pathId FROM user WHERE id=? AND isActive=1 LIMIT 1",
     [id],
   );
   return rows?.[0] || null;

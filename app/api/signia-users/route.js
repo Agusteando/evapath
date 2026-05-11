@@ -24,7 +24,7 @@ async function GET(req) {
     const pathDB = await getPathPool();
 
     const [sigAll] = await signiaDB.query(
-      "SELECT id,email,name,evaId,pathId,fechaIngreso FROM user",
+      "SELECT id,email,name,evaId,pathId,fechaIngreso FROM user WHERE isActive=1",
     );
 
     const eva = getEva();

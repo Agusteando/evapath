@@ -8,6 +8,13 @@ export const EMPTY_NAMES = {
   apellidoMaterno: "",
 };
 
+
+export function isActiveSigniaUser(user = {}) {
+  if (user.isActive === undefined || user.isActive === null) return true;
+  if (user.isActive === true) return true;
+  return String(user.isActive).trim() === "1";
+}
+
 /**
  * Returns true if a Signia user is missing any critical linkage information
  * required by the reconciliation / association process.
@@ -37,25 +44,27 @@ export function isUserMissingAny(u) {
  * - "all": no missing-based filter (return all users)
  */
 export function filterByMissingCategory(users, filter) {
+  const activeUsers = (users || []).filter(isActiveSigniaUser);
+
   switch (filter) {
     case "missing":
-      return users.filter(isUserMissingAny);
+      return activeUsers.filter(isUserMissingAny);
     case "nombres":
-      return users.filter(
+      return activeUsers.filter(
         (u) => u.missingNombres || u.missingApellido || u.missingNames,
       );
     case "eva":
-      return users.filter((u) => !u.hasEva);
+      return activeUsers.filter((u) => !u.hasEva);
     case "path":
-      return users.filter((u) => !u.hasPath);
+      return activeUsers.filter((u) => !u.hasPath);
     case "both":
-      return users.filter((u) => !u.hasEva && !u.hasPath);
+      return activeUsers.filter((u) => !u.hasEva && !u.hasPath);
     case "eco":
-      return users.filter((u) => !u.hasEco || !u.hasMmpi);
+      return activeUsers.filter((u) => !u.hasEco || !u.hasMmpi);
     case "all":
-      return users;
+      return activeUsers;
     default:
-      return users.filter(isUserMissingAny);
+      return activeUsers.filter(isUserMissingAny);
   }
 }
 

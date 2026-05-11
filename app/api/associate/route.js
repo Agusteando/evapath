@@ -20,21 +20,18 @@ export async function POST(req, context) {
     
     // Fetch user details for audit
     let targetObj = { id: signiaId, name: "Expediente Desconocido", email: "" };
-    const [userRows] = await signiaDB.query("SELECT name, email FROM user WHERE id=?", [signiaId]);
-    if (userRows.length) {
-      targetObj = { id: signiaId, name: userRows[0].name || "Sin nombre", email: userRows[0].email || "" };
+    const [userRows] = await signiaDB.query("SELECT name, email FROM user WHERE id=? AND isActive=1", [signiaId]);
+    if (!userRows.length) {
+      await logAudit(session.user, "ASSOCIATE_USER", targetObj, source.toUpperCase(), "ERROR", { cid, error: "User not found or inactive" });
+      return NextResponse.json({ ok: false, error: "User not found or inactive" }, { status: 404 });
     }
+    targetObj = { id: signiaId, name: userRows[0].name || "Sin nombre", email: userRows[0].email || "" };
 
     const column = source === "eva" ? "evaId" : "pathId";
-    const [result] = await signiaDB.query(
-      `UPDATE user SET ${column}=? WHERE id=?`,
+    await signiaDB.query(
+      `UPDATE user SET ${column}=? WHERE id=? AND isActive=1`,
       [cid, signiaId]
     );
-
-    if (!result || !result.affectedRows) {
-      await logAudit(session.user, "ASSOCIATE_USER", targetObj, source.toUpperCase(), "ERROR", { cid, error: "User not found" });
-      return NextResponse.json({ ok: false, error: "User not found or not updated" }, { status: 404 });
-    }
 
     await logAudit(session.user, "ASSOCIATE_USER", targetObj, source.toUpperCase(), "SUCCESS", { cid });
 

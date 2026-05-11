@@ -17,13 +17,15 @@ async function POST(req) {
     
     // Fetch user details for audit
     let targetObj = { id: signiaId, name: "Expediente Desconocido", email: "" };
-    const [userRows] = await signiaDB.query("SELECT name, email FROM user WHERE id=?", [signiaId]);
-    if (userRows.length) {
-      targetObj = { id: signiaId, name: userRows[0].name || "Sin nombre", email: userRows[0].email || "" };
+    const [userRows] = await signiaDB.query("SELECT name, email FROM user WHERE id=? AND isActive=1", [signiaId]);
+    if (!userRows.length) {
+      await logAudit(session.user, "DISASSOCIATE_USER", targetObj, source.toUpperCase(), "ERROR", { error: "User not found or inactive" });
+      return NextResponse.json({ ok: false, error: "User not found or inactive" }, { status: 404 });
     }
+    targetObj = { id: signiaId, name: userRows[0].name || "Sin nombre", email: userRows[0].email || "" };
 
     await signiaDB.query(
-      `UPDATE user SET ${source === "eva" ? "evaId" : "pathId"}=NULL WHERE id=?`,
+      `UPDATE user SET ${source === "eva" ? "evaId" : "pathId"}=NULL WHERE id=? AND isActive=1`,
       [signiaId]
     );
 

@@ -28,7 +28,7 @@ export function getCurrentStatus(user = {}) {
 
 export async function getSigniaUsers(signiaDB) {
   const [rows] = await signiaDB.query(
-    `SELECT id,nombres,apellidoPaterno,apellidoMaterno,name,email,evaId,pathId FROM user`,
+    `SELECT id,nombres,apellidoPaterno,apellidoMaterno,name,email,evaId,pathId FROM user WHERE isActive=1`,
   );
   return rows || [];
 }
@@ -240,7 +240,7 @@ export async function applyEmailOpportunity({ requestedIds = null, waitForEva = 
     if (!updates.length) continue;
 
     params.push(match.signiaId);
-    await signiaDB.query(`UPDATE user SET ${updates.join(", ")} WHERE id=?`, params);
+    await signiaDB.query(`UPDATE user SET ${updates.join(", ")} WHERE id=? AND isActive=1`, params);
 
     if (match.evaCandidate) evaSet += 1;
     if (match.pathCandidate) pathSet += 1;
