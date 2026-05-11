@@ -43,6 +43,7 @@ function LoadingState() {
 }
 
 function formatCount(value) {
+  if (value === null || value === undefined) return "—";
   return Number(value || 0).toLocaleString("es-MX");
 }
 
@@ -70,6 +71,26 @@ function getMissingLabel(user = {}) {
 
 function resolveSearch(user = {}) {
   return getPrimarySearchValue(user) || user.email || getDisplayName(user);
+}
+
+function getUserKey(user = {}, index = 0, scope = "user") {
+  return `${scope}-${user.id ?? user.signiaId ?? user.email ?? getDisplayName(user)}-${index}`;
+}
+
+function dedupeUsers(rows = []) {
+  const map = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = row?.id != null ? `id:${row.id}` : `fallback:${row?.email || getDisplayName(row)}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, row);
+      continue;
+    }
+    if (!existing.curpPath && row?.curpPath) {
+      map.set(key, { ...existing, curpPath: row.curpPath, curpStatus: row.curpStatus });
+    }
+  }
+  return Array.from(map.values());
 }
 
 function StatChip({ label, value, emphasis = false }) {
@@ -134,9 +155,9 @@ function SummaryPendingCard({ title, count, users, actionLabel, onOpen }) {
       </div>
       <div className="mt-4 space-y-2">
         {users.length ? (
-          users.slice(0, 5).map((user) => (
+          users.slice(0, 5).map((user, index) => (
             <div
-              key={user.id}
+              key={getUserKey(user, index, title)}
               className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
             >
               <UserIdentity user={user} />
@@ -177,6 +198,9 @@ function EmailMatchPanel({
 }) {
   const matches = Array.isArray(preview?.matches) ? preview.matches : [];
   const selectedCount = selectedIds.size;
+  const evaEmailCount = preview?.evaReady === false ? null : preview?.evaSet ?? 0;
+  const bothEmailCount = preview?.evaReady === false ? null : preview?.bothSet ?? 0;
+  const breakdown = preview?.breakdown || {};
 
   function toggleSelected(id) {
     setSelectedIds((prev) => {
@@ -205,11 +229,11 @@ function EmailMatchPanel({
               Coincidencias directas por email
             </h2>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <StatChip label="Signia → EVA" value={preview?.evaSet || 0} />
-              <StatChip label="Signia → PATH" value={preview?.pathSet || 0} />
+              <StatChip label="Sin EVA → EVA" value={evaEmailCount} />
+              <StatChip label="Sin PATH → PATH" value={preview?.pathSet ?? 0} />
               <StatChip
-                label="Signia → EVA + PATH"
-                value={preview?.bothSet || 0}
+                label="Sin ambos → EVA + PATH"
+                value={bothEmailCount}
                 emphasis
               />
             </div>
@@ -268,6 +292,11 @@ function EmailMatchPanel({
               ? "Calculando coincidencias..."
               : `${formatCount(matches.length)} registros listos por email`}
           </div>
+          {!loading && (
+            <div className="text-xs font-semibold text-slate-500">
+              Sin ambos con EVA: {formatCount(preview?.evaReady === false ? null : breakdown.missingBothWithEva ?? 0)} · Sin ambos con PATH: {formatCount(breakdown.missingBothWithPath ?? 0)}
+            </div>
+          )}
           {!!matches.length && (
             <div className="flex items-center gap-2">
               <button
@@ -308,10 +337,10 @@ function EmailMatchPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {matches.map((match) => {
+                  {matches.map((match, index) => {
                     const id = String(match.signiaId);
                     return (
-                      <tr key={id} className="hover:bg-slate-50">
+                      <tr key={`email-match-${id}-${match.targets?.join("-") || "target"}-${index}`} className="hover:bg-slate-50">
                         <td className="px-3 py-3 align-top">
                           <input
                             type="checkbox"
@@ -394,8 +423,8 @@ function PendingTable({ title, users, actionLabel, onAction, motive }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-slate-50">
+                  {users.map((user, index) => (
+                    <tr key={getUserKey(user, index, title)} className="hover:bg-slate-50">
                       <td className="px-3 py-3 align-top">
                         <UserIdentity user={user} />
                       </td>
@@ -463,7 +492,7 @@ function CriticalTable({ users, onAction }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {users.map((user) => {
+                  {users.map((user, index) => {
                     const dataPoints = [
                       user.email ? "Email" : null,
                       user.hasCurp ? "CURP" : null,
@@ -471,7 +500,7 @@ function CriticalTable({ users, onAction }) {
                       user.missingNames ? null : "Nombre completo",
                     ].filter(Boolean);
                     return (
-                      <tr key={user.id} className="hover:bg-rose-50/40">
+                      <tr key={getUserKey(user, index, "critical")} className="hover:bg-rose-50/40">
                         <td className="px-3 py-3 align-top">
                           <UserIdentity user={user} />
                         </td>
@@ -548,7 +577,6 @@ export default function VinculacionView({ openManual, openAuto }) {
     () => users.filter((user) => !hasEvaLink(user) && !hasPathLink(user)),
     [users],
   );
-  const emailMatches = Array.isArray(bulkPreview?.matches) ? bulkPreview.matches : [];
   const unresolvedLinkCount = Math.max(
     0,
     stats.withoutEva + stats.withoutPath - (bulkPreview?.evaSet || 0) - (bulkPreview?.pathSet || 0),
@@ -563,7 +591,7 @@ export default function VinculacionView({ openManual, openAuto }) {
       if (!response.ok) {
         throw new Error(data?.error || "No se pudo cargar el resumen de Signia.");
       }
-      setUsers(Array.isArray(data) ? data : []);
+      setUsers(dedupeUsers(Array.isArray(data) ? data : []));
     } catch (error) {
       setLoadError(error?.message || "No se pudo cargar el resumen.");
     } finally {
@@ -652,8 +680,11 @@ export default function VinculacionView({ openManual, openAuto }) {
               <StatChip label="Sin EVA" value={stats.withoutEva} />
               <StatChip label="Sin PATH" value={stats.withoutPath} />
               <StatChip label="Sin ambos" value={stats.withoutBoth} emphasis />
-              <StatChip label="Email EVA" value={bulkPreview?.evaSet || 0} />
-              <StatChip label="Email PATH" value={bulkPreview?.pathSet || 0} />
+              <StatChip
+                label="Email EVA"
+                value={bulkPreview?.evaReady === false ? null : bulkPreview?.evaSet ?? 0}
+              />
+              <StatChip label="Email PATH" value={bulkPreview?.pathSet ?? 0} />
             </div>
           </div>
         </header>

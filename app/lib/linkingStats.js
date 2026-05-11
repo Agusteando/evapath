@@ -5,11 +5,11 @@ export function normalizeEmail(value) {
 }
 
 export function hasEvaLink(user) {
-  return Boolean(user?.hasEva || user?.evaId || user?.evaMatch);
+  return Boolean(user?.hasEva || user?.evaId);
 }
 
 export function hasPathLink(user) {
-  return Boolean(user?.hasPath || user?.pathId || user?.pathMatch);
+  return Boolean(user?.hasPath || user?.pathId);
 }
 
 export function getMissingLinkType(user) {

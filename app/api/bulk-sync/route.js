@@ -42,18 +42,42 @@ async function getSigniaUsers(signiaDB) {
   return rows || [];
 }
 
-async function getEvaEmailMap({ waitForReady = false } = {}) {
+async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 } = {}) {
   const eva = getEva();
-  if (waitForReady) await waitEva();
+  let waitError = null;
 
-  if (!eva.ready) {
-    return { map: new Map(), ready: false, status: eva.status || "init" };
+  if (waitForReady && !eva.ready) {
+    try {
+      await waitEva(timeoutMs);
+    } catch (error) {
+      waitError = error;
+    }
   }
 
-  const evaUsers = eva.getUsers();
+  if (!eva.ready) {
+    return {
+      map: new Map(),
+      ready: false,
+      status: eva.status || "init",
+      error: waitError?.message || null,
+    };
+  }
+
+  let evaUsers = [];
+  try {
+    evaUsers = eva.getUsers();
+  } catch (error) {
+    return {
+      map: new Map(),
+      ready: false,
+      status: eva.status || "error",
+      error: error?.message || "No se pudieron leer usuarios EVA",
+    };
+  }
+
   const map = new Map();
   for (const user of evaUsers || []) {
-    const email = normalizeEmail(user.correo || user.M);
+    const email = normalizeEmail(user.correo || user.M || user.email || user.Email);
     if (!email || !user.CID || map.has(email)) continue;
     map.set(email, {
       id: user.CID,
@@ -62,14 +86,12 @@ async function getEvaEmailMap({ waitForReady = false } = {}) {
     });
   }
 
-  return { map, ready: true, status: eva.status || "ready" };
+  return { map, ready: true, status: eva.status || "ready", error: null };
 }
 
 async function getPathEmailMap(pathDB, signiaUsers) {
   const emails = Array.from(
-    new Set(
-      signiaUsers.map((user) => normalizeEmail(user.email)).filter(Boolean),
-    ),
+    new Set(signiaUsers.map((user) => normalizeEmail(user.email)).filter(Boolean)),
   );
 
   if (!emails.length) return new Map();
@@ -78,8 +100,11 @@ async function getPathEmailMap(pathDB, signiaUsers) {
   const chunkSize = 500;
   for (let i = 0; i < emails.length; i += chunkSize) {
     const chunk = emails.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => "?").join(",");
     const [rows] = await pathDB.query(
-      `SELECT id,nombre,email FROM candidatos WHERE email IN (${chunk.map(() => "?").join(",")})`,
+      `SELECT id, CONCAT_WS(' ', nombres, apellidopaterno, apellidomaterno) AS name, email
+       FROM candidatos
+       WHERE email IS NOT NULL AND LOWER(TRIM(email)) IN (${placeholders})`,
       chunk,
     );
 
@@ -88,7 +113,7 @@ async function getPathEmailMap(pathDB, signiaUsers) {
       if (!email || !row.id || map.has(email)) continue;
       map.set(email, {
         id: row.id,
-        name: row.nombre || "PATH",
+        name: row.name || "PATH",
         email,
       });
     }
@@ -97,10 +122,22 @@ async function getPathEmailMap(pathDB, signiaUsers) {
   return map;
 }
 
+function createEmptyBreakdown() {
+  return {
+    eva: 0,
+    path: 0,
+    bothTargets: 0,
+    missingEva: 0,
+    missingPath: 0,
+    missingBoth: 0,
+    missingBothWithEva: 0,
+    missingBothWithPath: 0,
+    missingBothWithBothTargets: 0,
+  };
+}
+
 function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
-  let evaSet = 0;
-  let pathSet = 0;
-  let bothSet = 0;
+  const breakdown = createEmptyBreakdown();
   const matches = [];
 
   for (const user of signiaUsers || []) {
@@ -109,12 +146,21 @@ function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
 
     const evaCandidate = evaByEmail.get(email) || null;
     const pathCandidate = pathByEmail.get(email) || null;
-    const canSetEva = !user.evaId && Boolean(evaCandidate);
-    const canSetPath = !user.pathId && Boolean(pathCandidate);
+    const missingEva = !user.evaId;
+    const missingPath = !user.pathId;
+    const missingBoth = missingEva && missingPath;
+    const canSetEva = missingEva && Boolean(evaCandidate);
+    const canSetPath = missingPath && Boolean(pathCandidate);
 
-    if (canSetEva) evaSet += 1;
-    if (canSetPath) pathSet += 1;
-    if (canSetEva && canSetPath) bothSet += 1;
+    if (canSetEva) breakdown.eva += 1;
+    if (canSetPath) breakdown.path += 1;
+    if (canSetEva && canSetPath) breakdown.bothTargets += 1;
+    if (missingEva && (canSetEva || canSetPath)) breakdown.missingEva += 1;
+    if (missingPath && (canSetEva || canSetPath)) breakdown.missingPath += 1;
+    if (missingBoth && (canSetEva || canSetPath)) breakdown.missingBoth += 1;
+    if (missingBoth && canSetEva) breakdown.missingBothWithEva += 1;
+    if (missingBoth && canSetPath) breakdown.missingBothWithPath += 1;
+    if (missingBoth && canSetEva && canSetPath) breakdown.missingBothWithBothTargets += 1;
 
     if (canSetEva || canSetPath) {
       matches.push({
@@ -122,11 +168,10 @@ function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
         name: getDisplayName(user),
         email,
         currentStatus: getCurrentStatus(user),
-        missingEva: !user.evaId,
-        missingPath: !user.pathId,
-        targets: [canSetEva ? "eva" : null, canSetPath ? "path" : null].filter(
-          Boolean,
-        ),
+        missingEva,
+        missingPath,
+        missingBoth,
+        targets: [canSetEva ? "eva" : null, canSetPath ? "path" : null].filter(Boolean),
         evaCandidate: canSetEva ? evaCandidate : null,
         pathCandidate: canSetPath ? pathCandidate : null,
       });
@@ -134,11 +179,12 @@ function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
   }
 
   return {
-    evaSet,
-    pathSet,
-    bothSet,
+    evaSet: breakdown.eva,
+    pathSet: breakdown.path,
+    bothSet: breakdown.bothTargets,
     records: matches.length,
     totalSignia: signiaUsers.length,
+    breakdown,
     matches,
   };
 }
@@ -149,11 +195,7 @@ async function loadOpportunity({ waitForEva = false } = {}) {
   const signiaUsers = await getSigniaUsers(signiaDB);
   const evaResult = await getEvaEmailMap({ waitForReady: waitForEva });
   const pathByEmail = await getPathEmailMap(pathDB, signiaUsers);
-  const opportunity = getBulkEmailOpportunity(
-    signiaUsers,
-    evaResult.map,
-    pathByEmail,
-  );
+  const opportunity = getBulkEmailOpportunity(signiaUsers, evaResult.map, pathByEmail);
 
   return { signiaDB, signiaUsers, evaResult, pathByEmail, opportunity };
 }
@@ -163,14 +205,13 @@ export async function GET(req, context) {
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
   try {
-    const { evaResult, opportunity } = await loadOpportunity({
-      waitForEva: false,
-    });
+    const { evaResult, opportunity } = await loadOpportunity({ waitForEva: true });
 
     return NextResponse.json({
       ...opportunity,
       evaReady: evaResult.ready,
       evaStatus: evaResult.status,
+      evaError: evaResult.error,
       dryRun: true,
     });
   } catch (err) {
@@ -197,9 +238,7 @@ export async function POST(req, context) {
   }
 
   try {
-    const { signiaDB, evaResult, opportunity } = await loadOpportunity({
-      waitForEva: false,
-    });
+    const { signiaDB, evaResult, opportunity } = await loadOpportunity({ waitForEva: true });
 
     let evaSet = 0;
     let pathSet = 0;
@@ -226,10 +265,7 @@ export async function POST(req, context) {
       if (!updates.length) continue;
 
       params.push(match.signiaId);
-      await signiaDB.query(
-        `UPDATE user SET ${updates.join(", ")} WHERE id=?`,
-        params,
-      );
+      await signiaDB.query(`UPDATE user SET ${updates.join(", ")} WHERE id=?`, params);
 
       if (match.evaCandidate) evaSet += 1;
       if (match.pathCandidate) pathSet += 1;
@@ -250,6 +286,8 @@ export async function POST(req, context) {
       records: updatedIds.size,
       selected: requestedIds ? requestedIds.size : null,
       totalSignia: opportunity.totalSignia,
+      evaReady: evaResult.ready,
+      evaStatus: evaResult.status,
     });
 
     return NextResponse.json({
