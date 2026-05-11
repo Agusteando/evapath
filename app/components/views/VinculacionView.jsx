@@ -894,7 +894,7 @@ export default function VinculacionView({ openManual, openAuto }) {
     if (!silent) setLoading(true);
     setLoadError("");
     try {
-      const response = await fetch("/api/signia-missing");
+      const response = await fetch("/api/signia-missing", { cache: "no-store" });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(data?.error || "No se pudo cargar el resumen de Signia.");
@@ -911,7 +911,7 @@ export default function VinculacionView({ openManual, openAuto }) {
     setBulkLoading(true);
     setBulkError("");
     try {
-      const response = await fetch("/api/bulk-sync");
+      const response = await fetch("/api/bulk-sync", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.error || "No se pudo calcular la coincidencia por email.");
@@ -930,7 +930,7 @@ export default function VinculacionView({ openManual, openAuto }) {
     setNameLoading(true);
     setNameError("");
     try {
-      const response = await fetch("/api/bulk-name-sync");
+      const response = await fetch("/api/bulk-name-sync", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.error || "No se pudo calcular la coincidencia por nombre.");
@@ -1038,6 +1038,14 @@ export default function VinculacionView({ openManual, openAuto }) {
     fetchNamePreview();
     fetchAutoSyncStatus();
   }, []);
+
+  useEffect(() => {
+    if (bulkLoading || bulkPreview?.evaReady !== false) return;
+    const timer = setTimeout(() => {
+      fetchBulkPreview();
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [bulkLoading, bulkPreview?.evaReady]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);

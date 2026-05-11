@@ -1,6 +1,7 @@
 import { getSigniaPool, getPathPool } from "./serverDb.js";
 import { computeNameMatchScore, tokenizeName } from "./nameMatch.js";
-import { normalizeEmail, getDisplayName, getCurrentStatus } from "./bulkEmailSync.js";
+import { getDisplayName, getCurrentStatus } from "./bulkEmailSync.js";
+import { getEvaEmail, getPathEmail, getSigniaEmail } from "./emailIdentity.js";
 
 const DEFAULT_MIN_SCORE = 95;
 
@@ -99,7 +100,7 @@ export async function getEvaNamePool({ waitForReady = false, timeoutMs = 30000 }
       .map((user) => ({
         id: user.CID,
         name: user.nombre || user.N || "",
-        email: normalizeEmail(user.correo || user.M || user.email || user.Email),
+        email: getEvaEmail(user),
       }))
       .filter((user) => user.id && user.name);
     return { users, ready: true, status: eva.status || "ready", error: null };
@@ -126,7 +127,7 @@ export async function getPathNamePool(pathDB) {
     .map((row) => ({
       id: row.id,
       name: String(row.name || "").trim(),
-      email: normalizeEmail(row.email),
+      email: getPathEmail(row),
     }))
     .filter((row) => row.id && row.name);
 }
@@ -142,10 +143,11 @@ function findSafeTopMatch({ user, candidates, linkedIds, minScore }) {
     const metrics = computeNameMatchScore(
       signiaName,
       candidate.name,
-      user.email,
+      getSigniaEmail(user),
       candidate.email,
     );
 
+    if (metrics.exactEmail) continue;
     if (!metrics.viable || metrics.score < minScore) continue;
     ranked.push({ candidate, metrics });
   }
@@ -263,7 +265,7 @@ export function getBulkNameOpportunity(signiaUsers, evaUsers, pathUsers, { minSc
     matches.push({
       signiaId: user.id,
       name: getDisplayName(user),
-      email: normalizeEmail(user.email),
+      email: getSigniaEmail(user),
       currentStatus: getCurrentStatus(user),
       missingEva,
       missingPath,

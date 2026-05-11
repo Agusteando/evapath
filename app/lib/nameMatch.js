@@ -1,3 +1,5 @@
+import { normalizeEmail } from "./emailIdentity.js";
+
 
 /**
  * Shared name-matching utilities for EVA and ECO/MMPI pipelines.
@@ -165,6 +167,27 @@ export function computeNameMatchScore(
     perWordThreshold = 0.86,
   } = {}
 ) {
+  const normalizedSigniaEmail = normalizeEmail(signiaEmail);
+  const normalizedCandidateEmail = normalizeEmail(candidateEmail);
+  const exactEmail = Boolean(
+    normalizedSigniaEmail &&
+      normalizedCandidateEmail &&
+      normalizedSigniaEmail === normalizedCandidateEmail,
+  );
+
+  if (exactEmail) {
+    return {
+      score: 100,
+      coverageA: 1,
+      matchedCount: tokenizeName(signiaName).length || 1,
+      avgWordSim: 1,
+      globalSim: stringSimilarity(signiaName, candidateName),
+      emailScore: 100,
+      exactEmail: true,
+      viable: true,
+    };
+  }
+
   const tokensA = tokenizeName(signiaName);
   const tokensB = tokenizeName(candidateName);
 
@@ -176,6 +199,7 @@ export function computeNameMatchScore(
       avgWordSim: 0,
       globalSim: 0,
       emailScore: 0,
+      exactEmail: false,
       viable: false,
     };
   }
@@ -220,6 +244,7 @@ export function computeNameMatchScore(
       avgWordSim,
       globalSim,
       emailScore,
+      exactEmail: false,
       viable: false,
     };
   }
@@ -242,6 +267,7 @@ export function computeNameMatchScore(
     avgWordSim,
     globalSim,
     emailScore,
+    exactEmail: false,
     viable: true,
   };
 }

@@ -13,7 +13,7 @@ export async function GET() {
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
   try {
-    const { evaResult, opportunity } = await loadEmailOpportunity({ waitForEva: true });
+    const { evaResult, opportunity } = await loadEmailOpportunity({ waitForEva: true, evaTimeoutMs: Number(process.env.BULK_EMAIL_SYNC_EVA_WAIT_MS || 90000) });
 
     return NextResponse.json({
       ...opportunity,
@@ -46,7 +46,7 @@ export async function POST(req) {
   }
 
   try {
-    const result = await applyEmailOpportunity({ requestedIds, waitForEva: true });
+    const result = await applyEmailOpportunity({ requestedIds, waitForEva: true, evaTimeoutMs: Number(process.env.BULK_EMAIL_SYNC_EVA_WAIT_MS || 90000) });
 
     const targetObj = {
       id: requestedIds ? "SELECTED" : "ALL",

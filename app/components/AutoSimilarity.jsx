@@ -7,6 +7,7 @@ import {
   classNames,
 } from "../lib/designTokens";
 import { computeNameMatchScore } from "../lib/nameMatch";
+import { getEvaEmail, getPathEmail, getSigniaEmail } from "../lib/emailIdentity";
 
 export default function AutoSimilarity({
   signiaUsers,
@@ -102,7 +103,7 @@ export default function AutoSimilarity({
       .filter(Boolean)
       .join(" ");
 
-    const signiaEmail = currentSignia.email || "";
+    const signiaEmail = getSigniaEmail(currentSignia);
 
     // --- Match EVA ---
     let evaM = [];
@@ -113,7 +114,7 @@ export default function AutoSimilarity({
             signiaName || fullName,
             source.nombre || "",
             signiaEmail,
-            source.correo || "",
+            getEvaEmail(source),
           );
           return {
             source,
@@ -135,7 +136,7 @@ export default function AutoSimilarity({
             fullName || signiaName,
             source.nombre || "",
             signiaEmail,
-            source.email || "",
+            getPathEmail(source),
           );
           return {
             source,
@@ -468,7 +469,7 @@ export default function AutoSimilarity({
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${m.score > 85 ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
                     >
-                      {m.score}%
+                      {m.exactEmail ? "Email exacto" : `${m.score}%`}
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-500 truncate mb-2">
@@ -541,7 +542,7 @@ export default function AutoSimilarity({
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${m.score > 85 ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
                     >
-                      {m.score}%
+                      {m.exactEmail ? "Email exacto" : `${m.score}%`}
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-500 truncate mb-1">

@@ -6,7 +6,7 @@ export const AUTO_EMAIL_SYNC_INTERVAL_MS = Number(
 );
 
 const CHECK_INTERVAL_MS = Number(process.env.AUTO_EMAIL_SYNC_CHECK_MS || 60 * 1000);
-const EVA_WAIT_TIMEOUT_MS = Number(process.env.AUTO_EMAIL_SYNC_EVA_WAIT_MS || 45 * 1000);
+const EVA_WAIT_TIMEOUT_MS = Number(process.env.AUTO_EMAIL_SYNC_EVA_WAIT_MS || 120 * 1000);
 
 const AUTO_AUDIT_USER = {
   email: "auto-email-sync@evapath.local",

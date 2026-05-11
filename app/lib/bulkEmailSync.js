@@ -1,9 +1,11 @@
 import { getSigniaPool, getPathPool } from "./serverDb.js";
+import { getEvaEmail, getPathEmail, getSigniaEmail, normalizeEmail } from "./emailIdentity.js";
 
-export function normalizeEmail(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
+export { normalizeEmail };
+
+function normalizeId(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return String(value);
 }
 
 export function getDisplayName(user = {}) {
@@ -83,12 +85,13 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
 
   const map = new Map();
   for (const user of evaUsers || []) {
-    const email = normalizeEmail(user.correo || user.M || user.email || user.Email);
+    const email = getEvaEmail(user);
     if (!email || !user.CID || map.has(email)) continue;
     map.set(email, {
       id: user.CID,
       name: user.nombre || user.N || "EVA",
       email,
+      exactEmail: true,
     });
   }
 
@@ -97,7 +100,7 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
 
 export async function getPathEmailMap(pathDB, signiaUsers) {
   const emails = Array.from(
-    new Set(signiaUsers.map((user) => normalizeEmail(user.email)).filter(Boolean)),
+    new Set(signiaUsers.map((user) => getSigniaEmail(user)).filter(Boolean)),
   );
 
   if (!emails.length) return new Map();
@@ -115,12 +118,13 @@ export async function getPathEmailMap(pathDB, signiaUsers) {
     );
 
     for (const row of rows || []) {
-      const email = normalizeEmail(row.email);
+      const email = getPathEmail(row);
       if (!email || !row.id || map.has(email)) continue;
       map.set(email, {
         id: row.id,
         name: row.name || "PATH",
         email,
+        exactEmail: true,
       });
     }
   }
@@ -145,9 +149,18 @@ export function createEmptyBreakdown() {
 export function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
   const breakdown = createEmptyBreakdown();
   const matches = [];
+  const evaOwnerByCandidateId = new Map();
+  const pathOwnerByCandidateId = new Map();
+
+  for (const owner of signiaUsers || []) {
+    const evaId = normalizeId(owner.evaId);
+    const pathId = normalizeId(owner.pathId);
+    if (evaId && !evaOwnerByCandidateId.has(evaId)) evaOwnerByCandidateId.set(evaId, owner);
+    if (pathId && !pathOwnerByCandidateId.has(pathId)) pathOwnerByCandidateId.set(pathId, owner);
+  }
 
   for (const user of signiaUsers || []) {
-    const email = normalizeEmail(user.email);
+    const email = getSigniaEmail(user);
     if (!email) continue;
 
     const evaCandidate = evaByEmail.get(email) || null;
@@ -155,8 +168,12 @@ export function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
     const missingEva = !user.evaId;
     const missingPath = !user.pathId;
     const missingBoth = missingEva && missingPath;
-    const canSetEva = missingEva && Boolean(evaCandidate);
-    const canSetPath = missingPath && Boolean(pathCandidate);
+    const evaOwner = evaCandidate ? evaOwnerByCandidateId.get(normalizeId(evaCandidate.id)) : null;
+    const pathOwner = pathCandidate ? pathOwnerByCandidateId.get(normalizeId(pathCandidate.id)) : null;
+    const evaOwnedByOther = evaOwner && String(evaOwner.id) !== String(user.id);
+    const pathOwnedByOther = pathOwner && String(pathOwner.id) !== String(user.id);
+    const canSetEva = missingEva && Boolean(evaCandidate) && !evaOwnedByOther;
+    const canSetPath = missingPath && Boolean(pathCandidate) && !pathOwnedByOther;
 
     if (canSetEva) breakdown.eva += 1;
     if (canSetPath) breakdown.path += 1;
@@ -240,7 +257,15 @@ export async function applyEmailOpportunity({ requestedIds = null, waitForEva = 
     if (!updates.length) continue;
 
     params.push(match.signiaId);
-    await signiaDB.query(`UPDATE user SET ${updates.join(", ")} WHERE id=? AND isActive=1`, params);
+    const missingGuards = [];
+    if (match.evaCandidate) missingGuards.push("(evaId IS NULL OR evaId=0 OR evaId='')");
+    if (match.pathCandidate) missingGuards.push("(pathId IS NULL OR pathId=0 OR pathId='')");
+
+    const [result] = await signiaDB.query(
+      `UPDATE user SET ${updates.join(", ")} WHERE id=? AND isActive=1 AND ${missingGuards.join(" AND ")}`,
+      params,
+    );
+    if (!Number(result?.affectedRows || 0)) continue;
 
     if (match.evaCandidate) evaSet += 1;
     if (match.pathCandidate) pathSet += 1;
