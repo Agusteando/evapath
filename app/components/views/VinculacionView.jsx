@@ -130,6 +130,103 @@ function dedupeUsers(rows = []) {
   return Array.from(map.values());
 }
 
+function csvCell(value) {
+  const raw = value === null || value === undefined ? "" : String(value);
+  return `"${raw.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const content = [
+    headers.map(csvCell).join(","),
+    ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(",")),
+  ].join("\n");
+  const blob = new Blob(["\ufeff", content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename.endsWith(".csv") ? filename : `${filename}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function safeFilePart(value) {
+  return String(value || "export")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function dataPointsForUser(user = {}) {
+  return [
+    user.email ? "Email" : null,
+    user.hasCurp ? "CURP" : null,
+    getPlantelLabel(user) !== "—" ? "Plantel" : null,
+    user.missingNames ? null : "Nombre completo",
+  ].filter(Boolean);
+}
+
+function getSourcePendingReason(user = {}, source, diagnostic) {
+  const sourceReasons = diagnostic?.pendingReasons?.[String(user.id)] || {};
+  const fallback = source === "eva" ? "Sin EVA" : "Sin PATH";
+  return sourceReasons[source] || fallback;
+}
+
+function getPanelPendingReason(user = {}, panel, diagnostic) {
+  if (panel === "eva") return getSourcePendingReason(user, "eva", diagnostic);
+  if (panel === "path") return getSourcePendingReason(user, "path", diagnostic);
+  return [
+    getSourcePendingReason(user, "eva", diagnostic),
+    getSourcePendingReason(user, "path", diagnostic),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function buildPendingExportRows(users = [], { panel = "missing", diagnostic } = {}) {
+  return (Array.isArray(users) ? users : []).map((user) => {
+    const motivoEva = getSourcePendingReason(user, "eva", diagnostic);
+    const motivoPath = getSourcePendingReason(user, "path", diagnostic);
+    return {
+      "Signia ID": user.id || "",
+      Nombre: getDisplayName(user),
+      Email: user.email || "",
+      Plantel: getPlantelLabel(user),
+      "Estado EVA": hasEvaLink(user) ? `Vinculado ${user.evaId || ""}`.trim() : "Sin EVA",
+      "Estado PATH": hasPathLink(user) ? `Vinculado ${user.pathId || ""}`.trim() : "Sin PATH",
+      Motivo: getPanelPendingReason(user, panel, diagnostic),
+      "Motivo EVA": motivoEva,
+      "Motivo PATH": motivoPath,
+      "Datos disponibles": dataPointsForUser(user).join(" · ") || "Mínimos",
+    };
+  });
+}
+
+function exportPendingCsv({ title, users, panel, diagnostic }) {
+  const rows = buildPendingExportRows(users, { panel, diagnostic });
+  if (!rows.length) return;
+  const date = new Date().toISOString().slice(0, 10);
+  downloadCsv(`vinculacion-${safeFilePart(title)}-${date}.csv`, rows);
+}
+
+function ExportButton({ onClick, disabled }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={classNames(BTN_BASE, BTN_SIZES.sm, BTN_VARIANTS.secondary)}
+    >
+      Exportar CSV
+    </button>
+  );
+}
+
 function StatChip({ label, value, emphasis = false }) {
   return (
     <div
@@ -209,7 +306,7 @@ function EmptyList({ label }) {
   );
 }
 
-function SummaryPendingCard({ title, count, users, actionLabel, onOpen }) {
+function SummaryPendingCard({ title, count, users, actionLabel, onOpen, onExport }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -221,14 +318,17 @@ function SummaryPendingCard({ title, count, users, actionLabel, onOpen }) {
             {formatCount(count)}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onOpen}
-          disabled={!count}
-          className={classNames(BTN_BASE, BTN_SIZES.sm, BTN_VARIANTS.secondary)}
-        >
-          {actionLabel}
-        </button>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <ExportButton onClick={onExport} disabled={!count} />
+          <button
+            type="button"
+            onClick={onOpen}
+            disabled={!count}
+            className={classNames(BTN_BASE, BTN_SIZES.sm, BTN_VARIANTS.secondary)}
+          >
+            {actionLabel}
+          </button>
+        </div>
       </div>
       <div className="mt-4 space-y-2">
         {users.length ? (
@@ -1014,7 +1114,7 @@ function NameMatchPanel({
   );
 }
 
-function PendingTable({ title, users, actionLabel, onAction, motive }) {
+function PendingTable({ title, users, actionLabel, onAction, onExport, getMotive }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
@@ -1026,14 +1126,17 @@ function PendingTable({ title, users, actionLabel, onAction, motive }) {
             {formatCount(users.length)} pendientes
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onAction()}
-          disabled={!users.length}
-          className={classNames(BTN_BASE, BTN_SIZES.sm, BTN_VARIANTS.secondary)}
-        >
-          Ver lista
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <ExportButton onClick={onExport} disabled={!users.length} />
+          <button
+            type="button"
+            onClick={() => onAction()}
+            disabled={!users.length}
+            className={classNames(BTN_BASE, BTN_SIZES.sm, BTN_VARIANTS.secondary)}
+          >
+            Ver lista
+          </button>
+        </div>
       </div>
       <div className="p-4">
         {users.length ? (
@@ -1058,7 +1161,7 @@ function PendingTable({ title, users, actionLabel, onAction, motive }) {
                         {user.email || "—"}
                       </td>
                       <td className="px-3 py-3 align-top text-slate-600">
-                        {motive || getMissingLabel(user)}
+                        {getMotive ? getMotive(user) : getMissingLabel(user)}
                       </td>
                       <td className="px-3 py-3 align-top text-right">
                         <button
@@ -1083,7 +1186,7 @@ function PendingTable({ title, users, actionLabel, onAction, motive }) {
   );
 }
 
-function CriticalTable({ users, onAction }) {
+function CriticalTable({ users, onAction, onExport, getMotive }) {
   return (
     <section className="rounded-2xl border border-rose-200 bg-white shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b border-rose-100 px-5 py-4">
@@ -1095,14 +1198,17 @@ function CriticalTable({ users, onAction }) {
             {formatCount(users.length)} usuarios sin ambos enlaces
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onAction()}
-          disabled={!users.length}
-          className={classNames(BTN_BASE, BTN_SIZES.sm, BTN_VARIANTS.danger)}
-        >
-          Priorizar
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <ExportButton onClick={onExport} disabled={!users.length} />
+          <button
+            type="button"
+            onClick={() => onAction()}
+            disabled={!users.length}
+            className={classNames(BTN_BASE, BTN_SIZES.sm, BTN_VARIANTS.danger)}
+          >
+            Priorizar
+          </button>
+        </div>
       </div>
       <div className="p-4">
         {users.length ? (
@@ -1114,6 +1220,7 @@ function CriticalTable({ users, onAction }) {
                     <th className="px-3 py-3">Nombre</th>
                     <th className="px-3 py-3">Email</th>
                     <th className="px-3 py-3">Datos disponibles</th>
+                    <th className="px-3 py-3">Motivo</th>
                     <th className="px-3 py-3 text-right">Mejor siguiente acción</th>
                   </tr>
                 </thead>
@@ -1135,6 +1242,9 @@ function CriticalTable({ users, onAction }) {
                         </td>
                         <td className="px-3 py-3 align-top text-slate-600">
                           {dataPoints.length ? dataPoints.join(" · ") : "Mínimos"}
+                        </td>
+                        <td className="px-3 py-3 align-top text-slate-600">
+                          {getMotive ? getMotive(user) : getMissingLabel(user)}
                         </td>
                         <td className="px-3 py-3 align-top text-right">
                           <button
@@ -1222,6 +1332,7 @@ export default function VinculacionView({ openManual, openAuto }) {
       (namePreview?.breakdown?.missingEva || 0) -
       (namePreview?.breakdown?.missingPath || 0),
   );
+  const emailDiagnostic = bulkPreview?.diagnostic || null;
 
   async function fetchSummary({ silent = false } = {}) {
     if (!silent) setLoading(true);
@@ -1453,6 +1564,7 @@ export default function VinculacionView({ openManual, openAuto }) {
             users={missingEva}
             actionLabel="Ver / revisar lista"
             onOpen={() => openManual("eva")}
+            onExport={() => exportPendingCsv({ title: "sin-eva", users: missingEva, panel: "eva", diagnostic: emailDiagnostic })}
           />
           <SummaryPendingCard
             title="Sin PATH"
@@ -1460,6 +1572,7 @@ export default function VinculacionView({ openManual, openAuto }) {
             users={missingPath}
             actionLabel="Ver / revisar lista"
             onOpen={() => openManual("path")}
+            onExport={() => exportPendingCsv({ title: "sin-path", users: missingPath, panel: "path", diagnostic: emailDiagnostic })}
           />
           <SummaryPendingCard
             title="Sin EVA y PATH"
@@ -1467,6 +1580,7 @@ export default function VinculacionView({ openManual, openAuto }) {
             users={missingBoth}
             actionLabel="Priorizar"
             onOpen={() => openManual("both")}
+            onExport={() => exportPendingCsv({ title: "sin-eva-y-path", users: missingBoth, panel: "both", diagnostic: emailDiagnostic })}
           />
         </section>
 
@@ -1500,19 +1614,26 @@ export default function VinculacionView({ openManual, openAuto }) {
             title="Pendientes EVA"
             users={missingEva}
             actionLabel="Vincular EVA"
-            motive="Sin EVA"
+            getMotive={(user) => getPanelPendingReason(user, "eva", emailDiagnostic)}
+            onExport={() => exportPendingCsv({ title: "pendientes-eva", users: missingEva, panel: "eva", diagnostic: emailDiagnostic })}
             onAction={(user) => openManualForUser("eva", user)}
           />
           <PendingTable
             title="Pendientes PATH"
             users={missingPath}
             actionLabel="Vincular PATH"
-            motive="Sin PATH"
+            getMotive={(user) => getPanelPendingReason(user, "path", emailDiagnostic)}
+            onExport={() => exportPendingCsv({ title: "pendientes-path", users: missingPath, panel: "path", diagnostic: emailDiagnostic })}
             onAction={(user) => openManualForUser("path", user)}
           />
         </section>
 
-        <CriticalTable users={missingBoth} onAction={(user) => openManualForUser("both", user)} />
+        <CriticalTable
+          users={missingBoth}
+          getMotive={(user) => getPanelPendingReason(user, "both", emailDiagnostic)}
+          onExport={() => exportPendingCsv({ title: "pendientes-criticos-sin-eva-y-path", users: missingBoth, panel: "both", diagnostic: emailDiagnostic })}
+          onAction={(user) => openManualForUser("both", user)}
+        />
 
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <CompactWorkflowCard

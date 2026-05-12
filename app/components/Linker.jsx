@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import LoaderOverlay from "./LoaderOverlay";
 import StatusBadge from "./StatusBadge";
 import SuggestionList from "./SuggestionList";
@@ -15,17 +15,7 @@ import {
   BTN_VARIANTS,
 } from "../lib/designTokens";
 import { filterLinkerUsers, EMPTY_NAMES } from "../lib/userUtils";
-import { getMissingLinkType, getPrimarySearchValue } from "../lib/linkingStats";
-
-// Simple debounce helper for internal Linker use (suggestions)
-function debounce(func, wait) {
-  let timeout;
-  return function (...args) {
-    const context = this;
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(context, args), wait);
-  };
-}
+import { getMissingLinkType } from "../lib/linkingStats";
 
 export default function Linker({
   asociar,
@@ -47,6 +37,8 @@ export default function Linker({
   // Suggestion Search inputs (Sidebar)
   const [lkEvaSearch, setLkEvaSearch] = useState("");
   const [lkPathSearch, setLkPathSearch] = useState("");
+  const evaSuggestionRequestRef = useRef(0);
+  const pathSuggestionRequestRef = useRef(0);
 
   const [_names, _setNames] = useState(EMPTY_NAMES);
   const [nameFieldState, setNameFieldState] = useState({
@@ -179,75 +171,108 @@ export default function Linker({
     u,
   ]);
 
-  // Debounced fetch functions for sidebars
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const fetchEvaSuggestions = useCallback(
-    debounce((term, exclude) => {
-      fetch(
-        "/api/search-eva?q=" +
-          encodeURIComponent(term) +
-          (exclude ? "&exclude=" + encodeURIComponent(exclude) : ""),
-      )
-        .then((r) => (r.ok ? r.json() : []))
-        .then((list) => setEvaList(Array.isArray(list) ? list : []))
-        .catch(() => setEvaList([]));
-    }, 300),
-    [],
-  );
+  function getManualSuggestionSearchValue(user = {}) {
+    const name = (
+      [user.nombres, user.apellidoPaterno, user.apellidoMaterno]
+        .filter(Boolean)
+        .join(" ") ||
+      user.fullName ||
+      user.name ||
+      ""
+    ).trim();
+    const firstNameToken = name.split(/\s+/).find(Boolean);
+    return firstNameToken || user.email || "";
+  }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const fetchPathSuggestions = useCallback(
-    debounce((term, exclude) => {
-      fetch(
-        "/api/search-path?q=" +
-          encodeURIComponent(term) +
-          (exclude ? "&exclude=" + encodeURIComponent(exclude) : ""),
-      )
-        .then((r) => (r.ok ? r.json() : []))
-        .then((list) =>
-          setPathList(
-            Array.isArray(list)
-              ? list.map((l) => ({
-                  ...l,
-                  name:
-                    l.name ||
-                    l.N ||
-                    (typeof l.label === "string"
-                      ? l.label.replace(/<.+>/, "").trim()
-                      : ""),
-                }))
-              : [],
-          ),
-        )
-        .catch(() => setPathList([]));
-    }, 300),
-    [],
-  );
-
-  // Trigger sidebar search when inputs change
   useEffect(() => {
     if (!u.id || u.hasEva) {
+      evaSuggestionRequestRef.current += 1;
       setEvaList([]);
       return;
     }
+
+    const requestId = evaSuggestionRequestRef.current + 1;
+    evaSuggestionRequestRef.current = requestId;
+    const controller = new AbortController();
+    const term = lkEvaSearch.trim();
     const excludeEva = asociar
       .filter((z) => z.evaId && z.id !== u.id)
       .map((z) => String(z.evaId))
       .join(",");
-    fetchEvaSuggestions(lkEvaSearch, excludeEva);
-  }, [lkEvaSearch, u.id, u.hasEva, asociar, fetchEvaSuggestions]);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: term });
+        if (excludeEva) params.set("exclude", excludeEva);
+        const response = await fetch(`/api/search-eva?${params.toString()}`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        const list = response.ok ? await response.json() : [];
+        if (evaSuggestionRequestRef.current !== requestId) return;
+        setEvaList(Array.isArray(list) ? list : []);
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        if (evaSuggestionRequestRef.current === requestId) setEvaList([]);
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [lkEvaSearch, u.id, u.hasEva, asociar]);
 
   useEffect(() => {
     if (!u.id || u.hasPath) {
+      pathSuggestionRequestRef.current += 1;
       setPathList([]);
       return;
     }
+
+    const requestId = pathSuggestionRequestRef.current + 1;
+    pathSuggestionRequestRef.current = requestId;
+    const controller = new AbortController();
+    const term = lkPathSearch.trim();
     const excludePath = asociar
       .filter((z) => z.pathId && z.id !== u.id)
       .map((z) => String(z.pathId))
       .join(",");
-    fetchPathSuggestions(lkPathSearch, excludePath);
-  }, [lkPathSearch, u.id, u.hasPath, asociar, fetchPathSuggestions]);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: term });
+        if (excludePath) params.set("exclude", excludePath);
+        const response = await fetch(`/api/search-path?${params.toString()}`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        const list = response.ok ? await response.json() : [];
+        if (pathSuggestionRequestRef.current !== requestId) return;
+        setPathList(
+          Array.isArray(list)
+            ? list.map((l) => ({
+                ...l,
+                name:
+                  l.name ||
+                  l.N ||
+                  (typeof l.label === "string"
+                    ? l.label.replace(/<.+>/, "").trim()
+                    : ""),
+              }))
+            : [],
+        );
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        if (pathSuggestionRequestRef.current === requestId) setPathList([]);
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [lkPathSearch, u.id, u.hasPath, asociar]);
 
   useEffect(() => {
     if (currIdx > maxIdx && maxIdx >= 0) setIdx(0);
@@ -268,7 +293,7 @@ export default function Linker({
       apellidoMaterno: "idle",
     });
     setNameFieldErr({ nombres: "", apellidoPaterno: "", apellidoMaterno: "" });
-    const defaultSearch = getPrimarySearchValue(u);
+    const defaultSearch = getManualSuggestionSearchValue(u);
     setLkEvaSearch(u.hasEva ? "" : defaultSearch);
     setLkPathSearch(u.hasPath ? "" : defaultSearch);
     setEvaSaveError("");

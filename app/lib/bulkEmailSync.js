@@ -754,6 +754,67 @@ function buildEmailSummary() {
   };
 }
 
+function describeEmailReasonForSource({ source, user, candidates, signiaEmailGroups }) {
+  const cfg = sourceConfig(source);
+  const currentId = toId(user?.[cfg.field]);
+  if (currentId) return `${cfg.label} vinculado`;
+
+  const email = getSigniaEmail(user);
+  if (!email) return `Sin email Signia para buscar ${cfg.label}`;
+
+  const sameEmailUsers = signiaEmailGroups.get(email) || [];
+  if (sameEmailUsers.length > 1) {
+    return `Conflicto: el email existe en ${sameEmailUsers.length} usuarios Signia activos`;
+  }
+
+  const resolution = resolveUniqueCandidate(candidates || []);
+  if (resolution.status === "none") {
+    return source === "eva"
+      ? "Sin registro EVA por email"
+      : "Sin registro PATH por email";
+  }
+  if (resolution.status === "missing_id") {
+    return source === "eva"
+      ? "EVA registrado por email; pruebas incompletas / sin CID usable"
+      : "PATH registrado por email; sin ID usable para vincular";
+  }
+  if (resolution.status === "candidate_conflict") {
+    return `${cfg.label} tiene múltiples registros usables con el mismo email; requiere revisión`;
+  }
+
+  return `Coincidencia ${cfg.label} por email lista para vincular #${resolution.candidate.id}`;
+}
+
+function buildPendingEmailReasons({ signiaUsers, evaByEmail, pathByEmail }) {
+  const signiaEmailGroups = buildSigniaEmailGroups(signiaUsers);
+  const pendingReasons = {};
+
+  for (const user of signiaUsers || []) {
+    const missingEva = !hasLinkValue(user.evaId);
+    const missingPath = !hasLinkValue(user.pathId);
+    if (!missingEva && !missingPath) continue;
+
+    const email = getSigniaEmail(user);
+    pendingReasons[String(user.id)] = {
+      eva: describeEmailReasonForSource({
+        source: "eva",
+        user,
+        candidates: email ? evaByEmail.get(email) || [] : [],
+        signiaEmailGroups,
+      }),
+      path: describeEmailReasonForSource({
+        source: "path",
+        user,
+        candidates: email ? pathByEmail.get(email) || [] : [],
+        signiaEmailGroups,
+      }),
+    };
+  }
+
+  return pendingReasons;
+}
+
+
 function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity, auditSearch = "", auditLimit = 25 }) {
   const emailState = countSigniaByEmailState(signiaUsers);
   const audit = buildEmailAudit({ signiaUsers, evaResult, pathByEmail, auditSearch, auditLimit });
@@ -822,6 +883,11 @@ function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity
       total: 0,
     },
     issues: opportunity?.issues || { conflicts: [], skipped: [] },
+    pendingReasons: buildPendingEmailReasons({
+      signiaUsers,
+      evaByEmail: evaResult?.map || new Map(),
+      pathByEmail,
+    }),
     audit,
   };
 }
