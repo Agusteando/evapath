@@ -113,9 +113,12 @@ export default function AutoSimilarity({
       return Boolean(signiaEmail && candidateEmail && normalizeEmail(signiaEmail) === normalizeEmail(candidateEmail));
     };
 
+    const evaHasAnyExactEmail = (evaUsers || []).some((source) => exactEmailCandidate(source, getEvaEmail));
+    const pathHasAnyExactEmail = (pathUsers || []).some((source) => exactEmailCandidate(source, getPathEmail));
+
     // --- Match EVA ---
     let evaM = [];
-    if (!hasLinkValue(currentSignia.evaId)) {
+    if (!hasLinkValue(currentSignia.evaId) && !evaHasAnyExactEmail) {
       evaM = evaUsers
         .map((source) => {
           const candidateEmail = getEvaEmail(source) || getAnyRecordEmail(source);
@@ -139,7 +142,7 @@ export default function AutoSimilarity({
 
     // --- Match PATH ---
     let pathM = [];
-    if (!hasLinkValue(currentSignia.pathId)) {
+    if (!hasLinkValue(currentSignia.pathId) && !pathHasAnyExactEmail) {
       pathM = pathUsers
         .map((source) => {
           const candidateEmail = getPathEmail(source) || getAnyRecordEmail(source);

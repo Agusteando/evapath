@@ -312,10 +312,10 @@ function EmailMatchPanel({
               Coincidencias directas por email
             </h2>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <StatChip label="Sin EVA → EVA" value={evaEmailCount} />
-              <StatChip label="Sin PATH → PATH" value={preview?.pathSet ?? 0} />
+              <StatChip label="EVA por email" value={evaEmailCount} />
+              <StatChip label="PATH por email" value={preview?.pathSet ?? 0} />
               <StatChip
-                label="Sin ambos → EVA + PATH"
+                label="EVA + PATH"
                 value={bothEmailCount}
                 emphasis
               />
@@ -446,7 +446,12 @@ function EmailMatchPanel({
                           </span>
                         </td>
                         <td className="px-3 py-3 align-top text-slate-700">
-                          {MatchTargetSummary({ match })}
+                          <div>{MatchTargetSummary({ match })}</div>
+                          {!!match.actionSummary?.length && (
+                            <div className="mt-1 text-[11px] font-bold text-emerald-700">
+                              {match.actionSummary.join(" · ")}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-top text-right">
                           <button
@@ -480,7 +485,7 @@ function EmailMatchDiagnostic({ diagnostic }) {
 
   const searchValue = query.trim();
   const effectiveDiagnostic = searchedDiagnostic || diagnostic;
-  const isBlocked = effectiveDiagnostic.status === "intersections-blocked";
+  const isBlocked = effectiveDiagnostic.status === "intersections-blocked" || effectiveDiagnostic.status === "intersections-not-actionable";
   const isCleanMiss = effectiveDiagnostic.status === "no-email-intersections";
   const boxClass = isBlocked
     ? "border-amber-200 bg-amber-50 text-amber-900"
@@ -545,8 +550,14 @@ function EmailMatchDiagnostic({ diagnostic }) {
         <div>Hits exactos EVA: {formatCount(effectiveDiagnostic.intersections?.eva ?? 0)}</div>
         <div>Hits exactos PATH: {formatCount(effectiveDiagnostic.intersections?.path ?? 0)}</div>
         <div>Aplicables: {formatCount(effectiveDiagnostic.accepted?.records ?? 0)}</div>
-        <div>Bloqueados por dueño activo: {formatCount((effectiveDiagnostic.blocked?.evaOwnedByOther ?? 0) + (effectiveDiagnostic.blocked?.pathOwnedByOther ?? 0))}</div>
+        <div>Conflictos: {formatCount(effectiveDiagnostic.actions?.conflicts?.total ?? 0)}</div>
+        <div>Creados: {formatCount(effectiveDiagnostic.actions?.created?.total ?? 0)}</div>
+        <div>Sobrescritos: {formatCount(effectiveDiagnostic.actions?.overwritten?.total ?? 0)}</div>
+        <div>Dueños reparados: {formatCount(effectiveDiagnostic.actions?.ownerRepairs?.total ?? 0)}</div>
+        <div>Omitidos: {formatCount(effectiveDiagnostic.actions?.skipped?.total ?? 0)}</div>
       </div>
+
+      <EmailIssueSummary diagnostic={effectiveDiagnostic} />
 
       <div className="mt-4 rounded-xl border border-white/70 bg-white/75 p-3 text-slate-800 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -555,7 +566,7 @@ function EmailMatchDiagnostic({ diagnostic }) {
               Auditoría acotada de emails
             </div>
             <div className="mt-1 text-xs font-semibold text-slate-600">
-              No se carga la lista completa. Busca un email, nombre o ID para comparar Signia pendiente contra EVA y PATH.
+              No se carga la lista completa. Busca un email, nombre o ID para comparar Signia activo contra EVA y PATH.
             </div>
           </div>
           <div className="relative w-full md:max-w-sm">
@@ -589,7 +600,7 @@ function EmailMatchDiagnostic({ diagnostic }) {
 
         <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
           <EmailAuditColumn
-            title="Signia pendientes"
+            title="Signia activos"
             rows={audit.signia || []}
             meta={audit.selection?.signia}
             type="signia"
@@ -610,6 +621,63 @@ function EmailMatchDiagnostic({ diagnostic }) {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function EmailIssueSummary({ diagnostic }) {
+  const conflicts = diagnostic?.issues?.conflicts || [];
+  const skipped = diagnostic?.issues?.skipped || [];
+  const hasIssues = conflicts.length || skipped.length;
+  if (!hasIssues) return null;
+
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <IssueList
+        title="Conflictos por email"
+        rows={conflicts}
+        emptyLabel="Sin conflictos"
+        tone="rose"
+      />
+      <IssueList
+        title="Omitidos por email"
+        rows={skipped}
+        emptyLabel="Sin omitidos"
+        tone="amber"
+      />
+    </div>
+  );
+}
+
+function IssueList({ title, rows, emptyLabel, tone = "slate" }) {
+  const visibleRows = Array.isArray(rows) ? rows.slice(0, 5) : [];
+  const borderClass = tone === "rose" ? "border-rose-200 bg-rose-50" : tone === "amber" ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50";
+  const textClass = tone === "rose" ? "text-rose-800" : tone === "amber" ? "text-amber-800" : "text-slate-700";
+
+  return (
+    <div className={classNames("rounded-xl border px-3 py-2", borderClass)}>
+      <div className={classNames("text-xs font-black uppercase tracking-wide", textClass)}>
+        {title}: {formatCount(rows?.length || 0)}
+      </div>
+      {visibleRows.length ? (
+        <div className="mt-2 space-y-1.5">
+          {visibleRows.map((row, index) => (
+            <div key={`${title}-${row.source || "source"}-${row.signiaId || row.email || index}-${index}`} className="rounded-lg bg-white/80 px-2 py-1.5 text-xs text-slate-700">
+              <div className="font-black text-slate-900">{row.email || "Sin email"}</div>
+              <div className="font-semibold">#{row.signiaId || "—"} · {row.name || "Sin nombre"}</div>
+              <div className="mt-0.5 font-semibold text-slate-500">{row.message || row.type}</div>
+            </div>
+          ))}
+          {rows.length > visibleRows.length && (
+            <div className="text-xs font-bold text-slate-500">
+              +{formatCount(rows.length - visibleRows.length)} más. Refina con la búsqueda de auditoría.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mt-2 text-xs font-semibold text-slate-500">{emptyLabel}</div>
+      )}
     </div>
   );
 }
@@ -685,13 +753,16 @@ function SigniaEmailAuditRow({ row }) {
 function SourceEmailAuditRow({ row, sourceLabel }) {
   const matched = row.matchedPendingCount > 0 || row.matched;
   const noUsableId = row.usableCount === 0 && row.count > 0;
+  const hasConflict = row.usableCount > 1;
   return (
     <div
       className={classNames(
         "rounded-lg border px-2.5 py-2 text-xs",
         matched
-          ? "border-emerald-200 bg-emerald-50"
-          : noUsableId
+          ? hasConflict
+            ? "border-rose-200 bg-rose-50"
+            : "border-emerald-200 bg-emerald-50"
+          : noUsableId || hasConflict
             ? "border-amber-200 bg-amber-50"
             : "border-slate-100 bg-slate-50",
       )}
@@ -709,6 +780,9 @@ function SourceEmailAuditRow({ row, sourceLabel }) {
           </span>
         )}
       </div>
+      {hasConflict && (
+        <div className="mt-1 font-bold text-rose-800">Email presente en más de un registro usable; requiere revisión.</div>
+      )}
       {noUsableId && (
         <div className="mt-1 font-bold text-amber-800">Email presente, sin ID usable para vincular.</div>
       )}
@@ -909,7 +983,12 @@ function NameMatchPanel({
                           </span>
                         </td>
                         <td className="px-3 py-3 align-top text-slate-700">
-                          {MatchTargetSummary({ match })}
+                          <div>{MatchTargetSummary({ match })}</div>
+                          {!!match.actionSummary?.length && (
+                            <div className="mt-1 text-[11px] font-bold text-emerald-700">
+                              {match.actionSummary.join(" · ")}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-top text-right">
                           <button
@@ -1138,10 +1217,10 @@ export default function VinculacionView({ openManual, openAuto }) {
     0,
     stats.withoutEva +
       stats.withoutPath -
-      (bulkPreview?.evaSet || 0) -
-      (bulkPreview?.pathSet || 0) -
-      (namePreview?.evaSet || 0) -
-      (namePreview?.pathSet || 0),
+      (bulkPreview?.breakdown?.missingEva || 0) -
+      (bulkPreview?.breakdown?.missingPath || 0) -
+      (namePreview?.breakdown?.missingEva || 0) -
+      (namePreview?.breakdown?.missingPath || 0),
   );
 
   async function fetchSummary({ silent = false } = {}) {
@@ -1233,7 +1312,7 @@ export default function VinculacionView({ openManual, openAuto }) {
         throw new Error(data?.error || "No se pudieron aplicar las coincidencias por email.");
       }
       setBulkResult(
-        `${formatCount(data.records || data.usersUpdated || 0)} usuarios actualizados por coincidencia directa.`,
+        `${formatCount(data.records || data.usersUpdated || 0)} usuarios procesados por email. Creados: ${formatCount(data.created || 0)} · Sobrescritos: ${formatCount(data.overwritten || 0)} · Dueños reparados: ${formatCount(data.ownerRepairs || 0)} · Conflictos: ${formatCount(data.conflicts || 0)} · Omitidos: ${formatCount(data.skipped || 0)}.`,
       );
       await Promise.all([
         fetchSummary({ silent: true }),

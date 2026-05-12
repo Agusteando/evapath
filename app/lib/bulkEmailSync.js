@@ -4,17 +4,39 @@ import { hasLinkValue, normalizeLinkId } from "./linkIdentity.js";
 
 export { normalizeEmail, hasLinkValue, normalizeLinkId };
 
+const SOURCE_CONFIG = {
+  eva: {
+    label: "EVA",
+    field: "evaId",
+    candidateKey: "evaCandidate",
+    actionKey: "eva",
+    conflictKey: "eva",
+  },
+  path: {
+    label: "PATH",
+    field: "pathId",
+    candidateKey: "pathCandidate",
+    actionKey: "path",
+    conflictKey: "path",
+  },
+};
+
 function toId(value) {
   return normalizeLinkId(value);
 }
 
+function sourceConfig(source) {
+  return SOURCE_CONFIG[source];
+}
+
 function addCandidate(map, email, candidate) {
-  if (!email || !candidate?.id) return;
+  if (!email) return;
   const key = normalizeEmail(email);
   if (!key) return;
   const existing = map.get(key) || [];
-  const candidateId = String(candidate.id);
-  if (!existing.some((item) => String(item.id) === candidateId)) {
+  const candidateId = toId(candidate?.id);
+  const identity = candidateId ? `id:${candidateId}` : `missing:${existing.length}`;
+  if (!candidateId || !existing.some((item) => `id:${toId(item?.id)}` === identity)) {
     existing.push(candidate);
   }
   map.set(key, existing);
@@ -36,43 +58,46 @@ function compareEvaCandidates(a, b) {
     return Number.isFinite(time) ? time : 0;
   };
 
-  return statusRank(b) - statusRank(a) || dateValue(b) - dateValue(a) || String(b.id).localeCompare(String(a.id), undefined, { numeric: true });
+  return statusRank(b) - statusRank(a) || dateValue(b) - dateValue(a) || String(b.id || "").localeCompare(String(a.id || ""), undefined, { numeric: true });
 }
 
-function selectAvailableCandidateWithReason(candidates = [], ownerByCandidateId, currentUser) {
-  if (!Array.isArray(candidates) || !candidates.length) {
-    return { candidate: null, reason: "no_candidates", ownedByOther: 0, missingId: 0, candidateCount: 0 };
-  }
-
-  let ownedByOther = 0;
-  let missingId = 0;
-
-  for (const candidate of candidates) {
-    const candidateId = toId(candidate?.id);
-    if (!candidateId) {
-      missingId += 1;
-      continue;
-    }
-    const owner = ownerByCandidateId.get(candidateId);
-    if (!owner || String(owner.id) === String(currentUser.id)) {
-      return {
-        candidate,
-        reason: owner ? "owned_by_current_user" : "available",
-        ownedByOther,
-        missingId,
-        candidateCount: candidates.length,
-      };
-    }
-    ownedByOther += 1;
-  }
-
+function compactCandidate(candidate = {}) {
   return {
-    candidate: null,
-    reason: ownedByOther ? "all_candidates_owned_by_other_active_signia" : "no_usable_candidate_id",
-    ownedByOther,
-    missingId,
-    candidateCount: candidates.length,
+    id: toId(candidate.id),
+    name: candidate.name || "Sin nombre",
+    email: normalizeEmail(candidate.email),
+    status: candidate.status || "",
+    fechaProceso: candidate.fechaProceso || "",
   };
+}
+
+function compactOwner(owner = {}, source) {
+  const cfg = sourceConfig(source);
+  return {
+    signiaId: owner.id,
+    name: getDisplayName(owner),
+    email: getSigniaEmail(owner),
+    previousId: toId(owner[cfg.field]),
+  };
+}
+
+function summarizeCandidates(candidates = [], limit = 5) {
+  return candidates.slice(0, limit).map(compactCandidate);
+}
+
+function summarizeOwners(owners = [], source, limit = 5) {
+  return owners.slice(0, limit).map((owner) => compactOwner(owner, source));
+}
+
+function pushLimited(list, item, limit = 100) {
+  if (!Array.isArray(list) || list.length >= limit) return;
+  list.push(item);
+}
+
+function incrementSummary(summary, section, source, amount = 1) {
+  if (!summary[section]) summary[section] = { eva: 0, path: 0, total: 0 };
+  summary[section][source] = Number(summary[section][source] || 0) + amount;
+  summary[section].total = Number(summary[section].total || 0) + amount;
 }
 
 export function getDisplayName(user = {}) {
@@ -122,6 +147,7 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       rowsWithoutEmail: 0,
       rowsWithoutId: 0,
       duplicateEmailGroups: 0,
+      emailRows: [],
     };
   }
 
@@ -146,6 +172,7 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       rowsWithoutEmail: 0,
       rowsWithoutId: 0,
       duplicateEmailGroups: 0,
+      emailRows: [],
     };
   }
 
@@ -164,6 +191,7 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       rowsWithoutEmail: 0,
       rowsWithoutId: 0,
       duplicateEmailGroups: 0,
+      emailRows: [],
     };
   }
 
@@ -190,10 +218,6 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       usable: Boolean(id),
       reason: id ? "usable" : "missing_id",
     });
-    if (!id) {
-      rowsWithoutId += 1;
-      continue;
-    }
     addCandidate(map, email, {
       id,
       name,
@@ -202,11 +226,12 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
       fechaProceso: user.fechaProceso || user.PD || "",
       exactEmail: true,
     });
+    if (!id) rowsWithoutId += 1;
   }
 
   let duplicateEmailGroups = 0;
   for (const [email, candidates] of map.entries()) {
-    if (candidates.length > 1) duplicateEmailGroups += 1;
+    if (candidates.filter((candidate) => toId(candidate.id)).length > 1) duplicateEmailGroups += 1;
     map.set(email, candidates.sort(compareEvaCandidates));
   }
 
@@ -258,21 +283,18 @@ export async function getPathEmailMap(pathDB, signiaUsers = []) {
       usable: Boolean(id),
       reason: id ? "usable" : "missing_id",
     });
-    if (!id) {
-      rowsWithoutId += 1;
-      continue;
-    }
     addCandidate(map, email, {
       id,
       name,
       email,
       exactEmail: true,
     });
+    if (!id) rowsWithoutId += 1;
   }
 
   let duplicateEmailGroups = 0;
   for (const candidates of map.values()) {
-    if (candidates.length > 1) duplicateEmailGroups += 1;
+    if (candidates.filter((candidate) => toId(candidate.id)).length > 1) duplicateEmailGroups += 1;
   }
 
   map.stats = {
@@ -324,7 +346,6 @@ function countSigniaByEmailState(signiaUsers = []) {
   return { withEmail, withoutEmail, missingEvaWithEmail, missingPathWithEmail, missingBothWithEmail };
 }
 
-
 function pushExample(bucket, row) {
   if (!Array.isArray(bucket.examples)) bucket.examples = [];
   if (bucket.examples.length >= 3) return;
@@ -336,7 +357,7 @@ function pushExample(bucket, row) {
   });
 }
 
-function aggregateSourceEmailRows(rows = [], pendingEmailSet = new Set()) {
+function aggregateSourceEmailRows(rows = [], pendingEmailSet = new Map()) {
   const byEmail = new Map();
   for (const row of rows || []) {
     const email = normalizeEmail(row?.email);
@@ -349,6 +370,7 @@ function aggregateSourceEmailRows(rows = [], pendingEmailSet = new Set()) {
         missingIdCount: 0,
         matchedPendingCount: 0,
         matched: false,
+        conflict: false,
         examples: [],
       });
     }
@@ -356,11 +378,12 @@ function aggregateSourceEmailRows(rows = [], pendingEmailSet = new Set()) {
     bucket.count += 1;
     if (row.usable === false) bucket.missingIdCount += 1;
     else bucket.usableCount += 1;
+    if (bucket.usableCount > 1) bucket.conflict = true;
     pushExample(bucket, row);
   }
 
-  for (const [email, bucket] of byEmail.entries()) {
-    const pendingCount = Number(pendingEmailSet.get(email) || 0);
+  for (const bucket of byEmail.values()) {
+    const pendingCount = Number(pendingEmailSet.get(bucket.email) || 0);
     bucket.matchedPendingCount = pendingCount;
     bucket.matched = pendingCount > 0;
   }
@@ -424,35 +447,37 @@ function selectAuditRows(rows = [], { search = "", limit = 25 } = {}) {
 }
 
 function buildEmailAudit({ signiaUsers, evaResult, pathByEmail, auditSearch = "", auditLimit = 25 }) {
-  const missingEvaEmails = new Map();
-  const missingPathEmails = new Map();
+  const evaComparableEmails = new Map();
+  const pathComparableEmails = new Map();
 
   for (const user of signiaUsers || []) {
     const email = getSigniaEmail(user);
     if (!email) continue;
-    if (!hasLinkValue(user.evaId)) incrementEmailCount(missingEvaEmails, email);
-    if (!hasLinkValue(user.pathId)) incrementEmailCount(missingPathEmails, email);
+    incrementEmailCount(evaComparableEmails, email);
+    incrementEmailCount(pathComparableEmails, email);
   }
 
-  const eva = aggregateSourceEmailRows(evaResult?.emailRows || [], missingEvaEmails);
-  const path = aggregateSourceEmailRows(pathByEmail?.emailRows || [], missingPathEmails);
+  const eva = aggregateSourceEmailRows(evaResult?.emailRows || [], evaComparableEmails);
+  const path = aggregateSourceEmailRows(pathByEmail?.emailRows || [], pathComparableEmails);
   const evaEmailSet = new Set(eva.map((row) => row.email));
   const pathEmailSet = new Set(path.map((row) => row.email));
 
   const signia = [];
   for (const user of signiaUsers || []) {
     const email = getSigniaEmail(user);
+    if (!email) continue;
     const missingEva = !hasLinkValue(user.evaId);
     const missingPath = !hasLinkValue(user.pathId);
-    if (!email || (!missingEva && !missingPath)) continue;
-    const evaEmailExists = missingEva && evaEmailSet.has(email);
-    const pathEmailExists = missingPath && pathEmailSet.has(email);
+    const evaEmailExists = evaEmailSet.has(email);
+    const pathEmailExists = pathEmailSet.has(email);
     signia.push({
       id: user.id,
       name: getDisplayName(user),
       email,
       missingEva,
       missingPath,
+      currentEvaId: toId(user.evaId),
+      currentPathId: toId(user.pathId),
       evaEmailExists,
       pathEmailExists,
       matched: Boolean(evaEmailExists || pathEmailExists),
@@ -492,37 +517,266 @@ function buildEmailAudit({ signiaUsers, evaResult, pathByEmail, auditSearch = ""
   };
 }
 
+function buildOwnerMaps(signiaUsers = []) {
+  const maps = { eva: new Map(), path: new Map() };
+  for (const owner of signiaUsers || []) {
+    const evaId = toId(owner.evaId);
+    const pathId = toId(owner.pathId);
+    if (evaId) {
+      const owners = maps.eva.get(evaId) || [];
+      owners.push(owner);
+      maps.eva.set(evaId, owners);
+    }
+    if (pathId) {
+      const owners = maps.path.get(pathId) || [];
+      owners.push(owner);
+      maps.path.set(pathId, owners);
+    }
+  }
+  return maps;
+}
+
+function buildSigniaEmailGroups(signiaUsers = []) {
+  const groups = new Map();
+  for (const user of signiaUsers || []) {
+    const email = getSigniaEmail(user);
+    if (!email) continue;
+    const list = groups.get(email) || [];
+    list.push(user);
+    groups.set(email, list);
+  }
+  return groups;
+}
+
+function resolveUniqueCandidate(candidates = []) {
+  const rows = Array.isArray(candidates) ? candidates : [];
+  if (!rows.length) return { status: "none", candidate: null, candidates: [], usableCandidates: [] };
+
+  const byId = new Map();
+  for (const candidate of rows) {
+    const id = toId(candidate?.id);
+    if (!id) continue;
+    if (!byId.has(id)) byId.set(id, { ...candidate, id });
+  }
+
+  const usableCandidates = Array.from(byId.values());
+  if (!usableCandidates.length) {
+    return { status: "missing_id", candidate: null, candidates: rows, usableCandidates };
+  }
+  if (usableCandidates.length > 1) {
+    return { status: "candidate_conflict", candidate: null, candidates: rows, usableCandidates };
+  }
+  return { status: "unique", candidate: usableCandidates[0], candidates: rows, usableCandidates };
+}
+
+function createAction({ source, user, candidate, currentId, staleOwners }) {
+  let type = "noop";
+  if (!currentId) type = "create";
+  else if (currentId !== String(candidate.id)) type = "overwrite";
+  else if (staleOwners.length) type = "repair";
+
+  return {
+    source,
+    label: sourceConfig(source).label,
+    type,
+    candidate: compactCandidate(candidate),
+    currentId: currentId || null,
+    nextId: String(candidate.id),
+    repairs: staleOwners.map((owner) => ({
+      ...compactOwner(owner, source),
+      reason: "email_authoritative_clear_stale_owner",
+    })),
+  };
+}
+
+function getActionLabel(action) {
+  if (!action) return "—";
+  if (action.type === "create") return `Crear ${action.label}`;
+  if (action.type === "overwrite") return `Sobrescribir ${action.label}`;
+  if (action.type === "repair") return `Reparar dueño ${action.label}`;
+  return `${action.label} correcto`;
+}
+
+function ensureMatch(matchMap, user) {
+  const key = String(user.id);
+  if (!matchMap.has(key)) {
+    matchMap.set(key, {
+      signiaId: user.id,
+      name: getDisplayName(user),
+      email: getSigniaEmail(user),
+      currentStatus: getCurrentStatus(user),
+      missingEva: !hasLinkValue(user.evaId),
+      missingPath: !hasLinkValue(user.pathId),
+      missingBoth: !hasLinkValue(user.evaId) && !hasLinkValue(user.pathId),
+      targets: [],
+      evaCandidate: null,
+      pathCandidate: null,
+      emailActions: {},
+      actionSummary: [],
+    });
+  }
+  return matchMap.get(key);
+}
+
+function addActionToMatch(matchMap, user, action) {
+  const cfg = sourceConfig(action.source);
+  const match = ensureMatch(matchMap, user);
+  match.targets.push(action.source);
+  match[cfg.candidateKey] = action.candidate;
+  match.emailActions[cfg.actionKey] = action;
+  match.actionSummary.push(getActionLabel(action));
+}
+
+function analyzeSourceForUser({ source, user, candidates, ownersById, signiaEmailGroups, matchMap, summary, issues, breakdown }) {
+  const cfg = sourceConfig(source);
+  const email = getSigniaEmail(user);
+  const currentId = toId(user[cfg.field]);
+  const missing = !currentId;
+  const resolution = resolveUniqueCandidate(candidates);
+
+  if (resolution.status === "none") return;
+
+  incrementSummary(summary, "intersections", source);
+
+  const signiaSameEmail = signiaEmailGroups.get(email) || [];
+  if (signiaSameEmail.length > 1) {
+    incrementSummary(summary, "conflicts", source);
+    pushLimited(issues.conflicts, {
+      source,
+      type: "duplicate_active_signia_email",
+      signiaId: user.id,
+      name: getDisplayName(user),
+      email,
+      message: "El mismo email existe en más de un usuario Signia activo.",
+      signiaUsers: signiaSameEmail.slice(0, 5).map((sameUser) => ({
+        signiaId: sameUser.id,
+        name: getDisplayName(sameUser),
+        email: getSigniaEmail(sameUser),
+      })),
+    });
+    return;
+  }
+
+  if (resolution.status === "missing_id") {
+    incrementSummary(summary, "skipped", source);
+    pushLimited(issues.skipped, {
+      source,
+      type: "email_present_without_usable_id",
+      signiaId: user.id,
+      name: getDisplayName(user),
+      email,
+      message: `${cfg.label} tiene el email, pero ningún registro con ID usable para vincular.`,
+      candidates: summarizeCandidates(resolution.candidates),
+    });
+    return;
+  }
+
+  if (resolution.status === "candidate_conflict") {
+    incrementSummary(summary, "conflicts", source);
+    pushLimited(issues.conflicts, {
+      source,
+      type: "multiple_candidates_same_email",
+      signiaId: user.id,
+      name: getDisplayName(user),
+      email,
+      message: `${cfg.label} tiene más de un candidato usable con el mismo email.`,
+      candidates: summarizeCandidates(resolution.usableCandidates),
+    });
+    return;
+  }
+
+  const candidate = resolution.candidate;
+  const candidateId = String(candidate.id);
+  const owners = ownersById.get(candidateId) || [];
+  const otherOwners = owners.filter((owner) => String(owner.id) !== String(user.id));
+  const conflictingOwners = otherOwners.filter((owner) => getSigniaEmail(owner) === email);
+
+  if (conflictingOwners.length) {
+    incrementSummary(summary, "conflicts", source);
+    pushLimited(issues.conflicts, {
+      source,
+      type: "candidate_owned_by_same_email_user",
+      signiaId: user.id,
+      name: getDisplayName(user),
+      email,
+      message: `${cfg.label} ya está vinculado a otro Signia activo con el mismo email.`,
+      owners: summarizeOwners(conflictingOwners, source),
+      candidate: compactCandidate(candidate),
+    });
+    return;
+  }
+
+  const staleOwners = otherOwners.filter((owner) => getSigniaEmail(owner) !== email);
+  const needsCurrentChange = currentId !== candidateId;
+  const needsRepair = staleOwners.length > 0;
+
+  if (!needsCurrentChange && !needsRepair) {
+    incrementSummary(summary, "alreadyCorrect", source);
+    return;
+  }
+
+  const action = createAction({ source, user, candidate, currentId, staleOwners });
+  addActionToMatch(matchMap, user, action);
+
+  if (action.type === "create") incrementSummary(summary, "created", source);
+  if (action.type === "overwrite") incrementSummary(summary, "overwritten", source);
+  if (needsRepair) incrementSummary(summary, "ownerRepairs", source, staleOwners.length);
+  incrementSummary(summary, "accepted", source);
+
+  if (source === "eva") breakdown.eva += 1;
+  if (source === "path") breakdown.path += 1;
+  if (source === "eva" && missing) breakdown.missingEva += 1;
+  if (source === "path" && missing) breakdown.missingPath += 1;
+}
+
+function finalizeBreakdown(matches = [], breakdown) {
+  for (const match of matches) {
+    const hasEvaAction = Boolean(match.emailActions?.eva);
+    const hasPathAction = Boolean(match.emailActions?.path);
+    if (hasEvaAction && hasPathAction) breakdown.bothTargets += 1;
+    if (match.missingBoth && (hasEvaAction || hasPathAction)) breakdown.missingBoth += 1;
+    if (match.missingBoth && hasEvaAction) breakdown.missingBothWithEva += 1;
+    if (match.missingBoth && hasPathAction) breakdown.missingBothWithPath += 1;
+    if (match.missingBoth && hasEvaAction && hasPathAction) breakdown.missingBothWithBothTargets += 1;
+  }
+}
+
+function buildEmailSummary() {
+  return {
+    intersections: { eva: 0, path: 0, total: 0 },
+    accepted: { eva: 0, path: 0, total: 0 },
+    created: { eva: 0, path: 0, total: 0 },
+    overwritten: { eva: 0, path: 0, total: 0 },
+    ownerRepairs: { eva: 0, path: 0, total: 0 },
+    alreadyCorrect: { eva: 0, path: 0, total: 0 },
+    conflicts: { eva: 0, path: 0, total: 0 },
+    skipped: { eva: 0, path: 0, total: 0 },
+  };
+}
+
 function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity, auditSearch = "", auditLimit = 25 }) {
   const emailState = countSigniaByEmailState(signiaUsers);
   const audit = buildEmailAudit({ signiaUsers, evaResult, pathByEmail, auditSearch, auditLimit });
-  const details = opportunity?.diagnosticDetails || {};
-  const availabilityIntersections = details.intersections || { eva: 0, path: 0, total: 0 };
-  const intersections = {
-    eva: audit.counts.signiaMatchedEva,
-    path: audit.counts.signiaMatchedPath,
-    total: audit.counts.signiaMatchedEva + audit.counts.signiaMatchedPath,
-    applicableEva: availabilityIntersections.eva,
-    applicablePath: availabilityIntersections.path,
-    applicableTotal: availabilityIntersections.total,
-  };
-  const accepted = details.accepted || { eva: 0, path: 0, records: 0 };
-  const blocked = details.blocked || { evaOwnedByOther: 0, pathOwnedByOther: 0 };
+  const summary = opportunity?.emailSummary || buildEmailSummary();
   const evaEmailsIndexed = evaResult?.ready === false ? null : Number(evaResult?.emailsIndexed || 0);
   const pathStats = pathByEmail?.stats || {};
   const pathEmailsIndexed = Number(pathStats.emailsIndexed || pathByEmail?.size || 0);
 
   let status = "ready";
-  let message = "Coincidencias directas por email calculadas.";
+  let message = "Email match autoritativo calculado.";
 
   if (evaResult?.ready === false) {
     status = "eva-not-ready";
     message = `EVA está en estado ${evaResult.status || "desconocido"}; las coincidencias EVA pueden estar incompletas.`;
-  } else if (intersections.total === 0) {
+  } else if (summary.intersections.total === 0) {
     status = "no-email-intersections";
     message = "No signia user email mached an email from eva or path";
-  } else if (!accepted.records) {
-    status = "intersections-blocked";
-    message = "Hay emails iguales entre Signia y EVA/PATH, pero no hay vínculos aplicables con ID usable y destino libre.";
+  } else if (summary.accepted.total === 0) {
+    status = "intersections-not-actionable";
+    message = "Hay emails iguales entre Signia y EVA/PATH, pero ninguno puede aplicarse automáticamente sin conflicto o ID usable.";
+  } else {
+    status = "authoritative-actions-ready";
+    message = "Hay coincidencias por email listas para crear, sobrescribir o reparar vínculos.";
   }
 
   return {
@@ -536,123 +790,96 @@ function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity
       pathEmailsIndexed,
     },
     compared: {
+      signiaWithEmail: emailState.withEmail,
       missingEvaWithEmail: emailState.missingEvaWithEmail,
       missingPathWithEmail: emailState.missingPathWithEmail,
       missingBothWithEmail: emailState.missingBothWithEmail,
     },
-    intersections,
-    accepted,
-    blocked,
+    intersections: {
+      eva: summary.intersections.eva,
+      path: summary.intersections.path,
+      total: summary.intersections.total,
+      applicableEva: summary.accepted.eva,
+      applicablePath: summary.accepted.path,
+      applicableTotal: summary.accepted.total,
+    },
+    accepted: {
+      eva: summary.accepted.eva,
+      path: summary.accepted.path,
+      records: opportunity?.records || 0,
+    },
+    actions: {
+      created: summary.created,
+      overwritten: summary.overwritten,
+      ownerRepairs: summary.ownerRepairs,
+      alreadyCorrect: summary.alreadyCorrect,
+      skipped: summary.skipped,
+      conflicts: summary.conflicts,
+    },
+    blocked: {
+      evaOwnedByOther: 0,
+      pathOwnedByOther: 0,
+      total: 0,
+    },
+    issues: opportunity?.issues || { conflicts: [], skipped: [] },
     audit,
   };
 }
 
 export function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
   const breakdown = createEmptyBreakdown();
-  const matches = [];
-  const evaOwnerByCandidateId = new Map();
-  const pathOwnerByCandidateId = new Map();
-
-  for (const owner of signiaUsers || []) {
-    const evaId = toId(owner.evaId);
-    const pathId = toId(owner.pathId);
-    if (evaId && !evaOwnerByCandidateId.has(evaId)) evaOwnerByCandidateId.set(evaId, owner);
-    if (pathId && !pathOwnerByCandidateId.has(pathId)) pathOwnerByCandidateId.set(pathId, owner);
-  }
-
-  const counters = {
-    evaIntersectionBeforeAvailability: 0,
-    pathIntersectionBeforeAvailability: 0,
-    evaRejectedOwnedByOther: 0,
-    pathRejectedOwnedByOther: 0,
-  };
+  const matchMap = new Map();
+  const ownerMaps = buildOwnerMaps(signiaUsers);
+  const signiaEmailGroups = buildSigniaEmailGroups(signiaUsers);
+  const summary = buildEmailSummary();
+  const issues = { conflicts: [], skipped: [] };
 
   for (const user of signiaUsers || []) {
     const email = getSigniaEmail(user);
     if (!email) continue;
 
-    const evaCandidates = evaByEmail.get(email) || [];
-    const pathCandidates = pathByEmail.get(email) || [];
-    const missingEva = !hasLinkValue(user.evaId);
-    const missingPath = !hasLinkValue(user.pathId);
-    const missingBoth = missingEva && missingPath;
+    analyzeSourceForUser({
+      source: "eva",
+      user,
+      candidates: evaByEmail.get(email) || [],
+      ownersById: ownerMaps.eva,
+      signiaEmailGroups,
+      matchMap,
+      summary,
+      issues,
+      breakdown,
+    });
 
-    if (missingEva && evaCandidates.length) counters.evaIntersectionBeforeAvailability += 1;
-    if (missingPath && pathCandidates.length) counters.pathIntersectionBeforeAvailability += 1;
-
-    const evaSelection = missingEva
-      ? selectAvailableCandidateWithReason(evaCandidates, evaOwnerByCandidateId, user)
-      : { candidate: null, reason: "not_missing_eva" };
-    const pathSelection = missingPath
-      ? selectAvailableCandidateWithReason(pathCandidates, pathOwnerByCandidateId, user)
-      : { candidate: null, reason: "not_missing_path" };
-
-    if (missingEva && !evaSelection.candidate && evaSelection.reason === "all_candidates_owned_by_other_active_signia") {
-      counters.evaRejectedOwnedByOther += 1;
-    }
-    if (missingPath && !pathSelection.candidate && pathSelection.reason === "all_candidates_owned_by_other_active_signia") {
-      counters.pathRejectedOwnedByOther += 1;
-    }
-
-    const evaCandidate = evaSelection.candidate;
-    const pathCandidate = pathSelection.candidate;
-    const canSetEva = missingEva && Boolean(evaCandidate);
-    const canSetPath = missingPath && Boolean(pathCandidate);
-
-    if (canSetEva) breakdown.eva += 1;
-    if (canSetPath) breakdown.path += 1;
-    if (canSetEva && canSetPath) breakdown.bothTargets += 1;
-    if (missingEva && (canSetEva || canSetPath)) breakdown.missingEva += 1;
-    if (missingPath && (canSetEva || canSetPath)) breakdown.missingPath += 1;
-    if (missingBoth && (canSetEva || canSetPath)) breakdown.missingBoth += 1;
-    if (missingBoth && canSetEva) breakdown.missingBothWithEva += 1;
-    if (missingBoth && canSetPath) breakdown.missingBothWithPath += 1;
-    if (missingBoth && canSetEva && canSetPath) breakdown.missingBothWithBothTargets += 1;
-
-    if (canSetEva || canSetPath) {
-      matches.push({
-        signiaId: user.id,
-        name: getDisplayName(user),
-        email,
-        currentStatus: getCurrentStatus(user),
-        missingEva,
-        missingPath,
-        missingBoth,
-        targets: [canSetEva ? "eva" : null, canSetPath ? "path" : null].filter(Boolean),
-        evaCandidate: canSetEva ? evaCandidate : null,
-        pathCandidate: canSetPath ? pathCandidate : null,
-        duplicateCandidates: {
-          eva: Array.isArray(evaCandidates) ? evaCandidates.length : 0,
-          path: Array.isArray(pathCandidates) ? pathCandidates.length : 0,
-        },
-      });
-    }
+    analyzeSourceForUser({
+      source: "path",
+      user,
+      candidates: pathByEmail.get(email) || [],
+      ownersById: ownerMaps.path,
+      signiaEmailGroups,
+      matchMap,
+      summary,
+      issues,
+      breakdown,
+    });
   }
 
+  const matches = Array.from(matchMap.values()).map((match) => ({
+    ...match,
+    targets: Array.from(new Set(match.targets)),
+  }));
+
+  finalizeBreakdown(matches, breakdown);
+
   return {
-    evaSet: breakdown.eva,
-    pathSet: breakdown.path,
-    bothSet: breakdown.bothTargets,
+    evaSet: summary.accepted.eva,
+    pathSet: summary.accepted.path,
+    bothSet: matches.filter((match) => match.emailActions?.eva && match.emailActions?.path).length,
     records: matches.length,
     totalSignia: signiaUsers.length,
     breakdown,
     matches,
-    diagnosticDetails: {
-      intersections: {
-        eva: counters.evaIntersectionBeforeAvailability,
-        path: counters.pathIntersectionBeforeAvailability,
-        total: counters.evaIntersectionBeforeAvailability + counters.pathIntersectionBeforeAvailability,
-      },
-      accepted: {
-        eva: breakdown.eva,
-        path: breakdown.path,
-        records: matches.length,
-      },
-      blocked: {
-        evaOwnedByOther: counters.evaRejectedOwnedByOther,
-        pathOwnedByOther: counters.pathRejectedOwnedByOther,
-      },
-    },
+    emailSummary: summary,
+    issues,
   };
 }
 
@@ -676,9 +903,41 @@ export async function loadEmailOpportunity({
     auditSearch,
     auditLimit,
   });
-  delete opportunity.diagnosticDetails;
 
   return { signiaDB, signiaUsers, evaResult, pathByEmail, opportunity };
+}
+
+function actionSourceKeys(match = {}) {
+  const actions = match.emailActions || {};
+  return [actions.eva ? "eva" : null, actions.path ? "path" : null].filter(Boolean);
+}
+
+async function applySourceAction(signiaDB, match, action) {
+  const cfg = sourceConfig(action.source);
+  const sourceField = cfg.field;
+  const nextId = toId(action.nextId || action.candidate?.id);
+  if (!nextId) return { applied: false, reason: "missing_next_id" };
+
+  let ownersCleared = 0;
+  for (const repair of action.repairs || []) {
+    if (!repair?.signiaId || String(repair.signiaId) === String(match.signiaId)) continue;
+    const [clearResult] = await signiaDB.query(
+      `UPDATE user SET ${sourceField}=NULL WHERE id=? AND isActive=1 AND ${sourceField}=?`,
+      [repair.signiaId, nextId],
+    );
+    ownersCleared += Number(clearResult?.affectedRows || 0);
+  }
+
+  const [updateResult] = await signiaDB.query(
+    `UPDATE user SET ${sourceField}=? WHERE id=? AND isActive=1`,
+    [nextId, match.signiaId],
+  );
+
+  return {
+    applied: true,
+    affectedRows: Number(updateResult?.affectedRows || 0),
+    ownersCleared,
+  };
 }
 
 export async function applyEmailOpportunity({ requestedIds = null, waitForEva = true, evaTimeoutMs = 30000 } = {}) {
@@ -693,43 +952,37 @@ export async function applyEmailOpportunity({ requestedIds = null, waitForEva = 
   let evaSet = 0;
   let pathSet = 0;
   let bothSet = 0;
+  let ownerRepairs = 0;
+  let overwritten = 0;
+  let created = 0;
   const updatedIds = new Set();
   const applied = [];
 
   for (const match of opportunity.matches) {
     if (requestedSet && !requestedSet.has(String(match.signiaId))) continue;
 
-    const updates = [];
-    const params = [];
-    const missingGuards = [];
+    const sourceKeys = actionSourceKeys(match);
+    if (!sourceKeys.length) continue;
 
-    if (match.evaCandidate) {
-      updates.push("evaId=?");
-      params.push(match.evaCandidate.id);
-      missingGuards.push("(evaId IS NULL OR evaId=0 OR evaId='')");
+    const appliedActions = [];
+    for (const source of sourceKeys) {
+      const action = match.emailActions[source];
+      const result = await applySourceAction(signiaDB, match, action);
+      if (!result.applied) continue;
+
+      if (source === "eva") evaSet += 1;
+      if (source === "path") pathSet += 1;
+      if (action.type === "create") created += 1;
+      if (action.type === "overwrite") overwritten += 1;
+      ownerRepairs += result.ownersCleared || 0;
+      appliedActions.push({ ...action, applyResult: result });
     }
 
-    if (match.pathCandidate) {
-      updates.push("pathId=?");
-      params.push(match.pathCandidate.id);
-      missingGuards.push("(pathId IS NULL OR pathId=0 OR pathId='')");
+    if (appliedActions.length) {
+      if (appliedActions.some((action) => action.source === "eva") && appliedActions.some((action) => action.source === "path")) bothSet += 1;
+      updatedIds.add(match.signiaId);
+      applied.push({ ...match, appliedActions });
     }
-
-    if (!updates.length) continue;
-
-    params.push(match.signiaId);
-    const [result] = await signiaDB.query(
-      `UPDATE user SET ${updates.join(", ")} WHERE id=? AND isActive=1 AND ${missingGuards.join(" AND ")}`,
-      params,
-    );
-
-    if (!Number(result?.affectedRows || 0)) continue;
-
-    if (match.evaCandidate) evaSet += 1;
-    if (match.pathCandidate) pathSet += 1;
-    if (match.evaCandidate && match.pathCandidate) bothSet += 1;
-    updatedIds.add(match.signiaId);
-    applied.push(match);
   }
 
   return {
@@ -744,6 +997,11 @@ export async function applyEmailOpportunity({ requestedIds = null, waitForEva = 
     evaError: evaResult.error,
     selected: requestedSet ? requestedSet.size : null,
     applied,
+    created,
+    overwritten,
+    ownerRepairs,
+    skipped: opportunity.emailSummary?.skipped?.total || 0,
+    conflicts: opportunity.emailSummary?.conflicts?.total || 0,
     diagnostic: opportunity.diagnostic,
   };
 }
