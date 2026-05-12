@@ -474,69 +474,137 @@ function EmailMatchPanel({
 
 function EmailMatchDiagnostic({ diagnostic }) {
   const [query, setQuery] = useState("");
-  const isBlocked = diagnostic.status === "intersections-blocked";
-  const isCleanMiss = diagnostic.status === "no-email-intersections";
+  const [searchedDiagnostic, setSearchedDiagnostic] = useState(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+
+  const searchValue = query.trim();
+  const effectiveDiagnostic = searchedDiagnostic || diagnostic;
+  const isBlocked = effectiveDiagnostic.status === "intersections-blocked";
+  const isCleanMiss = effectiveDiagnostic.status === "no-email-intersections";
   const boxClass = isBlocked
     ? "border-amber-200 bg-amber-50 text-amber-900"
     : isCleanMiss
       ? "border-slate-200 bg-slate-50 text-slate-700"
       : "border-emerald-200 bg-emerald-50 text-emerald-900";
-  const audit = diagnostic.audit || {};
-  const normalizedQuery = query.trim().toLowerCase();
+  const audit = effectiveDiagnostic.audit || {};
+  const canSearch = searchValue.length >= 2;
+
+  useEffect(() => {
+    setSearchedDiagnostic(null);
+    setSearchError("");
+  }, [diagnostic]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!canSearch) {
+      setSearchedDiagnostic(null);
+      setSearchLoading(false);
+      setSearchError("");
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setSearchLoading(true);
+      setSearchError("");
+      try {
+        const params = new URLSearchParams({
+          auditSearch: searchValue,
+          auditLimit: "40",
+        });
+        const response = await fetch(`/api/bulk-sync?${params.toString()}`, { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || "No se pudo buscar en la auditoría de emails.");
+        }
+        if (!cancelled) setSearchedDiagnostic(data.diagnostic || null);
+      } catch (error) {
+        if (!cancelled) setSearchError(error?.message || "No se pudo buscar en la auditoría de emails.");
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [canSearch, searchValue]);
 
   return (
     <div className={classNames("mt-4 rounded-xl border px-4 py-3", boxClass)}>
       <div className="text-sm font-black">
-        {diagnostic.message}
+        {effectiveDiagnostic.message}
       </div>
       <div className="mt-2 grid grid-cols-1 gap-2 text-xs font-semibold sm:grid-cols-2 lg:grid-cols-4">
-        <div>Signia activos con email: {formatCount(diagnostic.sources?.signiaWithEmail ?? 0)}</div>
-        <div>Sin EVA comparados: {formatCount(diagnostic.compared?.missingEvaWithEmail ?? 0)}</div>
-        <div>Sin PATH comparados: {formatCount(diagnostic.compared?.missingPathWithEmail ?? 0)}</div>
-        <div>Emails EVA/PATH indexados: {formatCount(diagnostic.sources?.evaEmailsIndexed)} / {formatCount(diagnostic.sources?.pathEmailsIndexed ?? 0)}</div>
-        <div>Hits exactos EVA: {formatCount(diagnostic.intersections?.eva ?? 0)}</div>
-        <div>Hits exactos PATH: {formatCount(diagnostic.intersections?.path ?? 0)}</div>
-        <div>Aplicables: {formatCount(diagnostic.accepted?.records ?? 0)}</div>
-        <div>Bloqueados por dueño activo: {formatCount((diagnostic.blocked?.evaOwnedByOther ?? 0) + (diagnostic.blocked?.pathOwnedByOther ?? 0))}</div>
+        <div>Signia activos con email: {formatCount(effectiveDiagnostic.sources?.signiaWithEmail ?? 0)}</div>
+        <div>Sin EVA comparados: {formatCount(effectiveDiagnostic.compared?.missingEvaWithEmail ?? 0)}</div>
+        <div>Sin PATH comparados: {formatCount(effectiveDiagnostic.compared?.missingPathWithEmail ?? 0)}</div>
+        <div>Emails EVA/PATH indexados: {formatCount(effectiveDiagnostic.sources?.evaEmailsIndexed)} / {formatCount(effectiveDiagnostic.sources?.pathEmailsIndexed ?? 0)}</div>
+        <div>Hits exactos EVA: {formatCount(effectiveDiagnostic.intersections?.eva ?? 0)}</div>
+        <div>Hits exactos PATH: {formatCount(effectiveDiagnostic.intersections?.path ?? 0)}</div>
+        <div>Aplicables: {formatCount(effectiveDiagnostic.accepted?.records ?? 0)}</div>
+        <div>Bloqueados por dueño activo: {formatCount((effectiveDiagnostic.blocked?.evaOwnedByOther ?? 0) + (effectiveDiagnostic.blocked?.pathOwnedByOther ?? 0))}</div>
       </div>
 
       <div className="mt-4 rounded-xl border border-white/70 bg-white/75 p-3 text-slate-800 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-xs font-black uppercase tracking-wide text-slate-500">
-              Auditoría de emails pendientes
+              Auditoría acotada de emails
             </div>
             <div className="mt-1 text-xs font-semibold text-slate-600">
-              Signia muestra usuarios activos con EVA o PATH pendiente. EVA y PATH muestran emails disponibles para comparar contra esos pendientes.
+              No se carga la lista completa. Busca un email, nombre o ID para comparar Signia pendiente contra EVA y PATH.
             </div>
           </div>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar email, nombre o ID..."
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 md:max-w-sm"
-          />
+          <div className="relative w-full md:max-w-sm">
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar email, nombre o ID..."
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 pr-10 text-sm font-semibold text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+            {searchLoading && (
+              <svg className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-slate-400" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                <path d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" fill="currentColor" />
+              </svg>
+            )}
+          </div>
         </div>
+
+        {searchError && (
+          <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+            {searchError}
+          </div>
+        )}
+
+        {!canSearch && (
+          <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+            Escribe al menos 2 caracteres. Sin búsqueda solo se muestran coincidencias reales, si existen.
+          </div>
+        )}
 
         <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
           <EmailAuditColumn
             title="Signia pendientes"
             rows={audit.signia || []}
-            query={normalizedQuery}
+            meta={audit.selection?.signia}
             type="signia"
           />
           <EmailAuditColumn
             title="Emails EVA"
             rows={audit.eva || []}
-            query={normalizedQuery}
+            meta={audit.selection?.eva}
             type="source"
             sourceLabel="EVA"
           />
           <EmailAuditColumn
             title="Emails PATH"
             rows={audit.path || []}
-            query={normalizedQuery}
+            meta={audit.selection?.path}
             type="source"
             sourceLabel="PATH"
           />
@@ -546,24 +614,9 @@ function EmailMatchDiagnostic({ diagnostic }) {
   );
 }
 
-function emailAuditMatchesQuery(row = {}, query = "") {
-  if (!query) return true;
-  const haystack = [
-    row.email,
-    row.name,
-    row.id,
-    row.matchSources?.join(" "),
-    ...(row.examples || []).flatMap((example) => [example.id, example.name, example.reason]),
-  ]
-    .filter((value) => value !== null && value !== undefined)
-    .join(" ")
-    .toLowerCase();
-  return haystack.includes(query);
-}
-
-function EmailAuditColumn({ title, rows, query, type, sourceLabel }) {
-  const filteredRows = (rows || []).filter((row) => emailAuditMatchesQuery(row, query));
-  const matchedCount = filteredRows.filter((row) => row.matched || row.matchedPendingCount > 0).length;
+function EmailAuditColumn({ title, rows, meta, type, sourceLabel }) {
+  const visibleRows = rows || [];
+  const matchedCount = visibleRows.filter((row) => row.matched || row.matchedPendingCount > 0).length;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
@@ -571,14 +624,19 @@ function EmailAuditColumn({ title, rows, query, type, sourceLabel }) {
         <div>
           <div className="text-xs font-black uppercase tracking-wide text-slate-700">{title}</div>
           <div className="text-[11px] font-semibold text-slate-500">
-            {formatCount(filteredRows.length)} de {formatCount(rows?.length || 0)} · matches {formatCount(matchedCount)}
+            Mostrando {formatCount(meta?.shown ?? visibleRows.length)} de {formatCount(meta?.filtered ?? visibleRows.length)} filtrados · total {formatCount(meta?.total ?? visibleRows.length)} · matches {formatCount(matchedCount)}
           </div>
+          {meta?.truncated && (
+            <div className="mt-0.5 text-[11px] font-bold text-amber-700">
+              Resultado acotado. Refina la búsqueda para ver menos filas.
+            </div>
+          )}
         </div>
       </div>
       <div className="max-h-80 overflow-auto p-2">
-        {filteredRows.length ? (
+        {visibleRows.length ? (
           <div className="space-y-1.5">
-            {filteredRows.map((row, index) => (
+            {visibleRows.map((row, index) => (
               type === "signia" ? (
                 <SigniaEmailAuditRow row={row} key={`signia-email-${row.id || row.email}-${index}`} />
               ) : (
@@ -588,7 +646,7 @@ function EmailAuditColumn({ title, rows, query, type, sourceLabel }) {
           </div>
         ) : (
           <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-6 text-center text-xs font-semibold text-slate-500">
-            Sin emails para ese filtro.
+            Sin filas para mostrar.
           </div>
         )}
       </div>

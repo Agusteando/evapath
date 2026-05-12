@@ -377,7 +377,53 @@ function incrementEmailCount(map, email) {
   map.set(email, (map.get(email) || 0) + 1);
 }
 
-function buildEmailAudit({ signiaUsers, evaResult, pathByEmail }) {
+function normalizeAuditQuery(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function auditRowMatchesQuery(row = {}, query = "") {
+  const normalizedQuery = normalizeAuditQuery(query);
+  if (!normalizedQuery) return true;
+  const haystack = [
+    row.email,
+    row.name,
+    row.id,
+    row.matchSources?.join(" "),
+    ...(row.examples || []).flatMap((example) => [example.id, example.name, example.reason]),
+  ]
+    .filter((value) => value !== null && value !== undefined)
+    .join(" ")
+    .normalize("NFKC")
+    .toLowerCase();
+  return haystack.includes(normalizedQuery);
+}
+
+function auditRowHasMatch(row = {}) {
+  return Boolean(row.matched || row.matchedPendingCount > 0 || row.evaEmailExists || row.pathEmailExists);
+}
+
+function selectAuditRows(rows = [], { search = "", limit = 25 } = {}) {
+  const normalizedSearch = normalizeAuditQuery(search);
+  const safeLimit = Math.max(0, Math.min(Number(limit) || 25, 100));
+  const baseRows = Array.isArray(rows) ? rows : [];
+  const filteredRows = normalizedSearch
+    ? baseRows.filter((row) => auditRowMatchesQuery(row, normalizedSearch))
+    : baseRows.filter(auditRowHasMatch);
+
+  return {
+    rows: filteredRows.slice(0, safeLimit),
+    filtered: filteredRows.length,
+    total: baseRows.length,
+    shown: Math.min(filteredRows.length, safeLimit),
+    truncated: filteredRows.length > safeLimit,
+  };
+}
+
+function buildEmailAudit({ signiaUsers, evaResult, pathByEmail, auditSearch = "", auditLimit = 25 }) {
   const missingEvaEmails = new Map();
   const missingPathEmails = new Map();
 
@@ -419,23 +465,36 @@ function buildEmailAudit({ signiaUsers, evaResult, pathByEmail }) {
     return a.email.localeCompare(b.email);
   });
 
+  const signiaMatchedEva = signia.filter((row) => row.evaEmailExists).length;
+  const signiaMatchedPath = signia.filter((row) => row.pathEmailExists).length;
+  const signiaSelection = selectAuditRows(signia, { search: auditSearch, limit: auditLimit });
+  const evaSelection = selectAuditRows(eva, { search: auditSearch, limit: auditLimit });
+  const pathSelection = selectAuditRows(path, { search: auditSearch, limit: auditLimit });
+
   return {
+    search: normalizeAuditQuery(auditSearch),
+    limit: Math.max(0, Math.min(Number(auditLimit) || 25, 100)),
     counts: {
       signia: signia.length,
       eva: eva.length,
       path: path.length,
-      signiaMatchedEva: signia.filter((row) => row.evaEmailExists).length,
-      signiaMatchedPath: signia.filter((row) => row.pathEmailExists).length,
+      signiaMatchedEva,
+      signiaMatchedPath,
     },
-    signia,
-    eva,
-    path,
+    selection: {
+      signia: { total: signiaSelection.total, filtered: signiaSelection.filtered, shown: signiaSelection.shown, truncated: signiaSelection.truncated },
+      eva: { total: evaSelection.total, filtered: evaSelection.filtered, shown: evaSelection.shown, truncated: evaSelection.truncated },
+      path: { total: pathSelection.total, filtered: pathSelection.filtered, shown: pathSelection.shown, truncated: pathSelection.truncated },
+    },
+    signia: signiaSelection.rows,
+    eva: evaSelection.rows,
+    path: pathSelection.rows,
   };
 }
 
-function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity }) {
+function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity, auditSearch = "", auditLimit = 25 }) {
   const emailState = countSigniaByEmailState(signiaUsers);
-  const audit = buildEmailAudit({ signiaUsers, evaResult, pathByEmail });
+  const audit = buildEmailAudit({ signiaUsers, evaResult, pathByEmail, auditSearch, auditLimit });
   const details = opportunity?.diagnosticDetails || {};
   const availabilityIntersections = details.intersections || { eva: 0, path: 0, total: 0 };
   const intersections = {
@@ -597,14 +656,26 @@ export function getBulkEmailOpportunity(signiaUsers, evaByEmail, pathByEmail) {
   };
 }
 
-export async function loadEmailOpportunity({ waitForEva = false, evaTimeoutMs = 30000 } = {}) {
+export async function loadEmailOpportunity({
+  waitForEva = false,
+  evaTimeoutMs = 30000,
+  auditSearch = "",
+  auditLimit = 25,
+} = {}) {
   const signiaDB = await getSigniaPool();
   const pathDB = await getPathPool();
   const signiaUsers = await getSigniaUsers(signiaDB);
   const evaResult = await getEvaEmailMap({ waitForReady: waitForEva, timeoutMs: evaTimeoutMs });
   const pathByEmail = await getPathEmailMap(pathDB, signiaUsers);
   const opportunity = getBulkEmailOpportunity(signiaUsers, evaResult.map, pathByEmail);
-  opportunity.diagnostic = buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity });
+  opportunity.diagnostic = buildEmailDiagnostic({
+    signiaUsers,
+    evaResult,
+    pathByEmail,
+    opportunity,
+    auditSearch,
+    auditLimit,
+  });
   delete opportunity.diagnosticDetails;
 
   return { signiaDB, signiaUsers, evaResult, pathByEmail, opportunity };

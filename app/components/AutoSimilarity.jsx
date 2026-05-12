@@ -7,7 +7,7 @@ import {
   classNames,
 } from "../lib/designTokens";
 import { computeNameMatchScore } from "../lib/nameMatch";
-import { getEvaEmail, getPathEmail, getSigniaEmail } from "../lib/emailIdentity";
+import { getAnyRecordEmail, getEvaEmail, getPathEmail, getSigniaEmail, normalizeEmail } from "../lib/emailIdentity";
 import { hasLinkValue, normalizeLinkId } from "../lib/linkIdentity";
 
 export default function AutoSimilarity({
@@ -108,21 +108,27 @@ export default function AutoSimilarity({
       .join(" ");
 
     const signiaEmail = getSigniaEmail(currentSignia);
+    const exactEmailCandidate = (source, preferredGetter) => {
+      const candidateEmail = preferredGetter(source) || getAnyRecordEmail(source);
+      return Boolean(signiaEmail && candidateEmail && normalizeEmail(signiaEmail) === normalizeEmail(candidateEmail));
+    };
 
     // --- Match EVA ---
     let evaM = [];
     if (!hasLinkValue(currentSignia.evaId)) {
       evaM = evaUsers
         .map((source) => {
+          const candidateEmail = getEvaEmail(source) || getAnyRecordEmail(source);
           const metrics = computeNameMatchScore(
             signiaName || fullName,
             source.nombre || "",
             signiaEmail,
-            getEvaEmail(source),
+            candidateEmail,
           );
           return {
             source,
             ...metrics,
+            exactEmail: metrics.exactEmail || exactEmailCandidate(source, getEvaEmail),
             takenBy: evaOwnerMap.get(String(source.CID)),
           };
         })
@@ -136,15 +142,17 @@ export default function AutoSimilarity({
     if (!hasLinkValue(currentSignia.pathId)) {
       pathM = pathUsers
         .map((source) => {
+          const candidateEmail = getPathEmail(source) || getAnyRecordEmail(source);
           const metrics = computeNameMatchScore(
             fullName || signiaName,
             source.nombre || "",
             signiaEmail,
-            getPathEmail(source),
+            candidateEmail,
           );
           return {
             source,
             ...metrics,
+            exactEmail: metrics.exactEmail || exactEmailCandidate(source, getPathEmail),
             takenBy: pathOwnerMap.get(String(source.id)),
           };
         })

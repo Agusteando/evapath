@@ -13,9 +13,14 @@ export async function GET(req) {
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
   try {
+    const { searchParams } = new URL(req.url);
+    const auditSearch = searchParams.get("auditSearch") || "";
+    const auditLimit = Number(searchParams.get("auditLimit") || 25);
     const { evaResult, opportunity } = await loadEmailOpportunity({
       waitForEva: true,
       evaTimeoutMs: Number(process.env.BULK_EMAIL_SYNC_EVA_WAIT_MS || 90000),
+      auditSearch,
+      auditLimit,
     });
 
     return NextResponse.json({

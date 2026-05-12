@@ -1,16 +1,16 @@
 # Email audit panel
 
-`Vinculación > Resumen > Coincidencias directas por email` now renders a compact email audit directly in the frontend.
+`Coincidencias directas por email` now returns a bounded diagnostic instead of rendering every indexed email.
 
-It compares only active Signia users that are still missing EVA and/or PATH against the EVA and PATH email universes used by the direct-email workflow.
+Default behavior:
+- shows aggregate counts
+- shows only real matched rows when they exist
+- does not send the full Signia/EVA/PATH email universe to the browser
 
-The panel includes:
+Search behavior:
+- the search box calls `/api/bulk-sync?auditSearch=<query>&auditLimit=40`
+- the backend filters Signia pending emails, EVA emails, and PATH emails server-side
+- each source is capped at 40 rows per request
+- matched rows are highlighted in the UI
 
-- pending Signia emails
-- EVA emails
-- PATH emails
-- a shared search input across all three sources
-- highlighted rows where a pending Signia email exists in EVA or PATH
-- a visible marker when an EVA/PATH email exists but has no usable ID for linking
-
-Auto-Similitud now excludes exact-email matches. Exact email cases belong in the direct-email area first, including the audit panel when they are not directly applicable.
+This is diagnostic-only. Bulk email matching and the background auto email sync still use the same shared matcher and do not depend on the UI search panel.
