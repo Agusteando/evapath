@@ -89,27 +89,7 @@ export default function AutoMatchView({ setView }) {
     }));
   }
 
-  async function handleReleaseAssociation(sid, source) {
-    const response = await fetch("/api/disassociate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signiaId: sid, source }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok)
-      throw new Error(
-        payload?.error || `No se pudo liberar ${source.toUpperCase()}`,
-      );
 
-    setData((prev) => ({
-      ...prev,
-      signia: prev.signia.map((user) => {
-        if (user.id !== sid) return user;
-        if (source === "eva") return { ...user, evaId: null, hasEva: false };
-        return { ...user, pathId: null, hasPath: false };
-      }),
-    }));
-  }
 
   if (data.loading) {
     return (
@@ -151,7 +131,6 @@ export default function AutoMatchView({ setView }) {
         pathUsers={data.path}
         onMatchEva={handleMatchEva}
         onMatchPath={handleMatchPath}
-        onReleaseAssociation={handleReleaseAssociation}
         onBack={() => setView("vinculacion")}
         loading={false}
       />

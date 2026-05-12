@@ -17,7 +17,6 @@ export default function AutoSimilarity({
   onMatchEva,
   onMatchPath,
   onBack,
-  onReleaseAssociation,
   loading,
 }) {
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -127,7 +126,7 @@ export default function AutoSimilarity({
             takenBy: evaOwnerMap.get(String(source.CID)),
           };
         })
-        .filter((m) => m.viable && (!m.takenBy || m.takenBy.id === currentSignia.id))
+        .filter((m) => m.viable && !m.exactEmail && !m.takenBy)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
     }
@@ -149,7 +148,7 @@ export default function AutoSimilarity({
             takenBy: pathOwnerMap.get(String(source.id)),
           };
         })
-        .filter((m) => m.viable && (!m.takenBy || m.takenBy.id === currentSignia.id))
+        .filter((m) => m.viable && !m.exactEmail && !m.takenBy)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
     }
@@ -182,11 +181,6 @@ export default function AutoSimilarity({
       setActionError("");
 
       try {
-        // Swap: if taken, release the previous owner before assigning the candidate.
-        if (match.takenBy) {
-          await onReleaseAssociation(match.takenBy.id, type);
-        }
-
         if (type === "eva") {
           await onMatchEva(currentSignia.id, cid);
           setStats((s) => ({ ...s, eva: s.eva + 1 }));
@@ -207,7 +201,7 @@ export default function AutoSimilarity({
         setProcessing(false);
       }
     },
-    [currentSignia, onMatchEva, onMatchPath, onReleaseAssociation],
+    [currentSignia, onMatchEva, onMatchPath],
   );
 
   // 5. Shortcuts
@@ -474,38 +468,20 @@ export default function AutoSimilarity({
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${m.score > 85 ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
                     >
-                      {m.exactEmail ? "Email exacto" : `${m.score}%`}
+                      {`${m.score}%`}
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-500 truncate mb-2">
                     {m.source.correo}
                   </div>
 
-                  {m.takenBy && (
-                    <div className="text-[10px] bg-orange-50 text-orange-700 p-1.5 rounded mb-2 border border-orange-100 flex items-center gap-2">
-                      <span>⚠️ Ocupado por:</span>
-                      <span className="font-bold truncate max-w-[100px]">
-                        {m.takenBy.name}
-                      </span>
-                    </div>
-                  )}
 
                   <button
                     onClick={() => handleAssociate("eva", m)}
                     disabled={processing}
-                    className={`w-full py-1.5 text-xs font-bold rounded shadow-sm transition-colors
-                                    ${
-                                      m.takenBy
-                                        ? "bg-orange-100 text-orange-700 hover:bg-orange-200 border border-orange-300"
-                                        : "bg-indigo-600 text-white hover:bg-indigo-700"
-                                    }
-                                `}
+                    className="w-full py-1.5 text-xs font-bold rounded bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
                   >
-                    {m.takenBy
-                      ? "🔄 Intercambiar"
-                      : i === 0
-                        ? "Asociar EVA (E)"
-                        : "Asociar EVA"}
+                    {i === 0 ? "Asociar EVA (E)" : "Asociar EVA"}
                   </button>
                 </div>
               </div>
@@ -547,7 +523,7 @@ export default function AutoSimilarity({
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${m.score > 85 ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
                     >
-                      {m.exactEmail ? "Email exacto" : `${m.score}%`}
+                      {`${m.score}%`}
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-500 truncate mb-1">
@@ -571,31 +547,13 @@ export default function AutoSimilarity({
                     )}
                   </div>
 
-                  {m.takenBy && (
-                    <div className="text-[10px] bg-orange-50 text-orange-700 p-1.5 rounded mb-2 border border-orange-100 flex items-center gap-2">
-                      <span>⚠️ Ocupado por:</span>
-                      <span className="font-bold truncate max-w-[100px]">
-                        {m.takenBy.name}
-                      </span>
-                    </div>
-                  )}
 
                   <button
                     onClick={() => handleAssociate("path", m)}
                     disabled={processing}
-                    className={`w-full py-1.5 text-xs font-bold rounded shadow-sm transition-colors
-                                    ${
-                                      m.takenBy
-                                        ? "bg-orange-100 text-orange-700 hover:bg-orange-200 border border-orange-300"
-                                        : "bg-emerald-600 text-white hover:bg-emerald-700"
-                                    }
-                                `}
+                    className="w-full py-1.5 text-xs font-bold rounded bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
                   >
-                    {m.takenBy
-                      ? "🔄 Intercambiar"
-                      : i === 0
-                        ? "Asociar PATH (P)"
-                        : "Asociar PATH"}
+                    {i === 0 ? "Asociar PATH (P)" : "Asociar PATH"}
                   </button>
                 </div>
               </div>

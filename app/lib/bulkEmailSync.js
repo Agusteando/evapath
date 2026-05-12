@@ -168,24 +168,35 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
   }
 
   const map = new Map();
+  const emailRows = [];
   let rowsWithEmail = 0;
   let rowsWithoutEmail = 0;
   let rowsWithoutId = 0;
 
   for (const user of evaUsers || []) {
     const email = getEvaEmail(user);
+    const id = toId(user.CID);
+    const name = user.nombre || user.N || "EVA";
     if (!email) {
       rowsWithoutEmail += 1;
       continue;
     }
     rowsWithEmail += 1;
-    if (!user.CID) {
+    emailRows.push({
+      source: "eva",
+      id,
+      name,
+      email,
+      usable: Boolean(id),
+      reason: id ? "usable" : "missing_id",
+    });
+    if (!id) {
       rowsWithoutId += 1;
       continue;
     }
     addCandidate(map, email, {
-      id: user.CID,
-      name: user.nombre || user.N || "EVA",
+      id,
+      name,
       email,
       status: user.estado || user.D || "",
       fechaProceso: user.fechaProceso || user.PD || "",
@@ -210,61 +221,53 @@ export async function getEvaEmailMap({ waitForReady = false, timeoutMs = 30000 }
     rowsWithoutEmail,
     rowsWithoutId,
     duplicateEmailGroups,
+    emailRows,
   };
 }
 
-export async function getPathEmailMap(pathDB, signiaUsers) {
-  const emails = Array.from(new Set(signiaUsers.map((user) => getSigniaEmail(user)).filter(Boolean)));
+export async function getPathEmailMap(pathDB, signiaUsers = []) {
   const map = new Map();
+  const emailRows = [];
   let rawRowsRead = 0;
   let rowsWithEmail = 0;
   let rowsWithoutEmail = 0;
   let rowsWithoutId = 0;
 
-  if (!emails.length) {
-    map.stats = {
-      signiaEmailsQueried: 0,
-      rawRowsRead,
-      rowsWithEmail,
-      rowsWithoutEmail,
-      rowsWithoutId,
-      emailsIndexed: 0,
-      duplicateEmailGroups: 0,
-    };
-    return map;
-  }
+  const [rows] = await pathDB.query(
+    `SELECT id, CONCAT_WS(' ', nombres, apellidopaterno, apellidomaterno) AS name, email
+     FROM candidatos
+     WHERE email IS NOT NULL AND TRIM(email) <> ''
+     ORDER BY id DESC`,
+  );
 
-  const chunkSize = 500;
-  for (let i = 0; i < emails.length; i += chunkSize) {
-    const chunk = emails.slice(i, i + chunkSize);
-    const placeholders = chunk.map(() => "?").join(",");
-    const [rows] = await pathDB.query(
-      `SELECT id, CONCAT_WS(' ', nombres, apellidopaterno, apellidomaterno) AS name, email
-       FROM candidatos
-       WHERE email IS NOT NULL AND LOWER(TRIM(email)) IN (${placeholders})
-       ORDER BY id DESC`,
-      chunk,
-    );
-
-    rawRowsRead += Array.isArray(rows) ? rows.length : 0;
-    for (const row of rows || []) {
-      const email = getPathEmail(row);
-      if (!email) {
-        rowsWithoutEmail += 1;
-        continue;
-      }
-      rowsWithEmail += 1;
-      if (!row.id) {
-        rowsWithoutId += 1;
-        continue;
-      }
-      addCandidate(map, email, {
-        id: row.id,
-        name: row.name || "PATH",
-        email,
-        exactEmail: true,
-      });
+  rawRowsRead = Array.isArray(rows) ? rows.length : 0;
+  for (const row of rows || []) {
+    const email = getPathEmail(row);
+    const id = toId(row.id);
+    const name = row.name || "PATH";
+    if (!email) {
+      rowsWithoutEmail += 1;
+      continue;
     }
+    rowsWithEmail += 1;
+    emailRows.push({
+      source: "path",
+      id,
+      name,
+      email,
+      usable: Boolean(id),
+      reason: id ? "usable" : "missing_id",
+    });
+    if (!id) {
+      rowsWithoutId += 1;
+      continue;
+    }
+    addCandidate(map, email, {
+      id,
+      name,
+      email,
+      exactEmail: true,
+    });
   }
 
   let duplicateEmailGroups = 0;
@@ -273,7 +276,7 @@ export async function getPathEmailMap(pathDB, signiaUsers) {
   }
 
   map.stats = {
-    signiaEmailsQueried: emails.length,
+    signiaEmailsQueried: Array.from(new Set((signiaUsers || []).map((user) => getSigniaEmail(user)).filter(Boolean))).length,
     rawRowsRead,
     rowsWithEmail,
     rowsWithoutEmail,
@@ -281,6 +284,7 @@ export async function getPathEmailMap(pathDB, signiaUsers) {
     emailsIndexed: map.size,
     duplicateEmailGroups,
   };
+  map.emailRows = emailRows;
 
   return map;
 }
@@ -320,10 +324,128 @@ function countSigniaByEmailState(signiaUsers = []) {
   return { withEmail, withoutEmail, missingEvaWithEmail, missingPathWithEmail, missingBothWithEmail };
 }
 
+
+function pushExample(bucket, row) {
+  if (!Array.isArray(bucket.examples)) bucket.examples = [];
+  if (bucket.examples.length >= 3) return;
+  bucket.examples.push({
+    id: row.id || null,
+    name: row.name || "Sin nombre",
+    usable: row.usable !== false,
+    reason: row.reason || "usable",
+  });
+}
+
+function aggregateSourceEmailRows(rows = [], pendingEmailSet = new Set()) {
+  const byEmail = new Map();
+  for (const row of rows || []) {
+    const email = normalizeEmail(row?.email);
+    if (!email) continue;
+    if (!byEmail.has(email)) {
+      byEmail.set(email, {
+        email,
+        count: 0,
+        usableCount: 0,
+        missingIdCount: 0,
+        matchedPendingCount: 0,
+        matched: false,
+        examples: [],
+      });
+    }
+    const bucket = byEmail.get(email);
+    bucket.count += 1;
+    if (row.usable === false) bucket.missingIdCount += 1;
+    else bucket.usableCount += 1;
+    pushExample(bucket, row);
+  }
+
+  for (const [email, bucket] of byEmail.entries()) {
+    const pendingCount = Number(pendingEmailSet.get(email) || 0);
+    bucket.matchedPendingCount = pendingCount;
+    bucket.matched = pendingCount > 0;
+  }
+
+  return Array.from(byEmail.values()).sort((a, b) => {
+    if (a.matched !== b.matched) return a.matched ? -1 : 1;
+    if (b.matchedPendingCount !== a.matchedPendingCount) return b.matchedPendingCount - a.matchedPendingCount;
+    return a.email.localeCompare(b.email);
+  });
+}
+
+function incrementEmailCount(map, email) {
+  if (!email) return;
+  map.set(email, (map.get(email) || 0) + 1);
+}
+
+function buildEmailAudit({ signiaUsers, evaResult, pathByEmail }) {
+  const missingEvaEmails = new Map();
+  const missingPathEmails = new Map();
+
+  for (const user of signiaUsers || []) {
+    const email = getSigniaEmail(user);
+    if (!email) continue;
+    if (!hasLinkValue(user.evaId)) incrementEmailCount(missingEvaEmails, email);
+    if (!hasLinkValue(user.pathId)) incrementEmailCount(missingPathEmails, email);
+  }
+
+  const eva = aggregateSourceEmailRows(evaResult?.emailRows || [], missingEvaEmails);
+  const path = aggregateSourceEmailRows(pathByEmail?.emailRows || [], missingPathEmails);
+  const evaEmailSet = new Set(eva.map((row) => row.email));
+  const pathEmailSet = new Set(path.map((row) => row.email));
+
+  const signia = [];
+  for (const user of signiaUsers || []) {
+    const email = getSigniaEmail(user);
+    const missingEva = !hasLinkValue(user.evaId);
+    const missingPath = !hasLinkValue(user.pathId);
+    if (!email || (!missingEva && !missingPath)) continue;
+    const evaEmailExists = missingEva && evaEmailSet.has(email);
+    const pathEmailExists = missingPath && pathEmailSet.has(email);
+    signia.push({
+      id: user.id,
+      name: getDisplayName(user),
+      email,
+      missingEva,
+      missingPath,
+      evaEmailExists,
+      pathEmailExists,
+      matched: Boolean(evaEmailExists || pathEmailExists),
+      matchSources: [evaEmailExists ? "EVA" : null, pathEmailExists ? "PATH" : null].filter(Boolean),
+    });
+  }
+
+  signia.sort((a, b) => {
+    if (a.matched !== b.matched) return a.matched ? -1 : 1;
+    return a.email.localeCompare(b.email);
+  });
+
+  return {
+    counts: {
+      signia: signia.length,
+      eva: eva.length,
+      path: path.length,
+      signiaMatchedEva: signia.filter((row) => row.evaEmailExists).length,
+      signiaMatchedPath: signia.filter((row) => row.pathEmailExists).length,
+    },
+    signia,
+    eva,
+    path,
+  };
+}
+
 function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity }) {
   const emailState = countSigniaByEmailState(signiaUsers);
+  const audit = buildEmailAudit({ signiaUsers, evaResult, pathByEmail });
   const details = opportunity?.diagnosticDetails || {};
-  const intersections = details.intersections || { eva: 0, path: 0, total: 0 };
+  const availabilityIntersections = details.intersections || { eva: 0, path: 0, total: 0 };
+  const intersections = {
+    eva: audit.counts.signiaMatchedEva,
+    path: audit.counts.signiaMatchedPath,
+    total: audit.counts.signiaMatchedEva + audit.counts.signiaMatchedPath,
+    applicableEva: availabilityIntersections.eva,
+    applicablePath: availabilityIntersections.path,
+    applicableTotal: availabilityIntersections.total,
+  };
   const accepted = details.accepted || { eva: 0, path: 0, records: 0 };
   const blocked = details.blocked || { evaOwnedByOther: 0, pathOwnedByOther: 0 };
   const evaEmailsIndexed = evaResult?.ready === false ? null : Number(evaResult?.emailsIndexed || 0);
@@ -341,7 +463,7 @@ function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity
     message = "No signia user email mached an email from eva or path";
   } else if (!accepted.records) {
     status = "intersections-blocked";
-    message = "Hay emails iguales, pero ninguno está listo para aplicarse porque ya está vinculado o no tiene un ID utilizable.";
+    message = "Hay emails iguales entre Signia y EVA/PATH, pero no hay vínculos aplicables con ID usable y destino libre.";
   }
 
   return {
@@ -362,6 +484,7 @@ function buildEmailDiagnostic({ signiaUsers, evaResult, pathByEmail, opportunity
     intersections,
     accepted,
     blocked,
+    audit,
   };
 }
 

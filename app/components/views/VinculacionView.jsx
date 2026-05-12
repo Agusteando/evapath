@@ -473,6 +473,7 @@ function EmailMatchPanel({
 }
 
 function EmailMatchDiagnostic({ diagnostic }) {
+  const [query, setQuery] = useState("");
   const isBlocked = diagnostic.status === "intersections-blocked";
   const isCleanMiss = diagnostic.status === "no-email-intersections";
   const boxClass = isBlocked
@@ -480,6 +481,8 @@ function EmailMatchDiagnostic({ diagnostic }) {
     : isCleanMiss
       ? "border-slate-200 bg-slate-50 text-slate-700"
       : "border-emerald-200 bg-emerald-50 text-emerald-900";
+  const audit = diagnostic.audit || {};
+  const normalizedQuery = query.trim().toLowerCase();
 
   return (
     <div className={classNames("mt-4 rounded-xl border px-4 py-3", boxClass)}>
@@ -496,6 +499,170 @@ function EmailMatchDiagnostic({ diagnostic }) {
         <div>Aplicables: {formatCount(diagnostic.accepted?.records ?? 0)}</div>
         <div>Bloqueados por dueño activo: {formatCount((diagnostic.blocked?.evaOwnedByOther ?? 0) + (diagnostic.blocked?.pathOwnedByOther ?? 0))}</div>
       </div>
+
+      <div className="mt-4 rounded-xl border border-white/70 bg-white/75 p-3 text-slate-800 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-xs font-black uppercase tracking-wide text-slate-500">
+              Auditoría de emails pendientes
+            </div>
+            <div className="mt-1 text-xs font-semibold text-slate-600">
+              Signia muestra usuarios activos con EVA o PATH pendiente. EVA y PATH muestran emails disponibles para comparar contra esos pendientes.
+            </div>
+          </div>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar email, nombre o ID..."
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 md:max-w-sm"
+          />
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
+          <EmailAuditColumn
+            title="Signia pendientes"
+            rows={audit.signia || []}
+            query={normalizedQuery}
+            type="signia"
+          />
+          <EmailAuditColumn
+            title="Emails EVA"
+            rows={audit.eva || []}
+            query={normalizedQuery}
+            type="source"
+            sourceLabel="EVA"
+          />
+          <EmailAuditColumn
+            title="Emails PATH"
+            rows={audit.path || []}
+            query={normalizedQuery}
+            type="source"
+            sourceLabel="PATH"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function emailAuditMatchesQuery(row = {}, query = "") {
+  if (!query) return true;
+  const haystack = [
+    row.email,
+    row.name,
+    row.id,
+    row.matchSources?.join(" "),
+    ...(row.examples || []).flatMap((example) => [example.id, example.name, example.reason]),
+  ]
+    .filter((value) => value !== null && value !== undefined)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function EmailAuditColumn({ title, rows, query, type, sourceLabel }) {
+  const filteredRows = (rows || []).filter((row) => emailAuditMatchesQuery(row, query));
+  const matchedCount = filteredRows.filter((row) => row.matched || row.matchedPendingCount > 0).length;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2">
+        <div>
+          <div className="text-xs font-black uppercase tracking-wide text-slate-700">{title}</div>
+          <div className="text-[11px] font-semibold text-slate-500">
+            {formatCount(filteredRows.length)} de {formatCount(rows?.length || 0)} · matches {formatCount(matchedCount)}
+          </div>
+        </div>
+      </div>
+      <div className="max-h-80 overflow-auto p-2">
+        {filteredRows.length ? (
+          <div className="space-y-1.5">
+            {filteredRows.map((row, index) => (
+              type === "signia" ? (
+                <SigniaEmailAuditRow row={row} key={`signia-email-${row.id || row.email}-${index}`} />
+              ) : (
+                <SourceEmailAuditRow row={row} sourceLabel={sourceLabel} key={`${sourceLabel || "source"}-email-${row.email}-${index}`} />
+              )
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-6 text-center text-xs font-semibold text-slate-500">
+            Sin emails para ese filtro.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SigniaEmailAuditRow({ row }) {
+  const matched = row.evaEmailExists || row.pathEmailExists;
+  return (
+    <div
+      className={classNames(
+        "rounded-lg border px-2.5 py-2 text-xs",
+        matched ? "border-emerald-200 bg-emerald-50" : "border-slate-100 bg-slate-50",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate font-black text-slate-900">{row.email}</div>
+          <div className="truncate font-semibold text-slate-600">#{row.id} · {row.name}</div>
+        </div>
+        {matched && (
+          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">
+            {row.matchSources?.join(" + ")}
+          </span>
+        )}
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {row.missingEva && <span className="rounded bg-indigo-50 px-1.5 py-0.5 font-bold text-indigo-700">Sin EVA</span>}
+        {row.missingPath && <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-bold text-emerald-700">Sin PATH</span>}
+      </div>
+    </div>
+  );
+}
+
+function SourceEmailAuditRow({ row, sourceLabel }) {
+  const matched = row.matchedPendingCount > 0 || row.matched;
+  const noUsableId = row.usableCount === 0 && row.count > 0;
+  return (
+    <div
+      className={classNames(
+        "rounded-lg border px-2.5 py-2 text-xs",
+        matched
+          ? "border-emerald-200 bg-emerald-50"
+          : noUsableId
+            ? "border-amber-200 bg-amber-50"
+            : "border-slate-100 bg-slate-50",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate font-black text-slate-900">{row.email}</div>
+          <div className="font-semibold text-slate-600">
+            {sourceLabel}: {formatCount(row.count)} registro{row.count === 1 ? "" : "s"} · usable {formatCount(row.usableCount)}
+          </div>
+        </div>
+        {matched && (
+          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">
+            MATCH
+          </span>
+        )}
+      </div>
+      {noUsableId && (
+        <div className="mt-1 font-bold text-amber-800">Email presente, sin ID usable para vincular.</div>
+      )}
+      {!!row.examples?.length && (
+        <div className="mt-1 space-y-0.5 text-[11px] font-semibold text-slate-500">
+          {row.examples.map((example, index) => (
+            <div key={`${row.email}-example-${example.id || index}`} className="truncate">
+              #{example.id || "sin ID"} · {example.name}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
