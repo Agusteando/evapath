@@ -143,6 +143,12 @@ export async function runAutoEmailSync({ force = false } = {}) {
     const result = await applyEmailOpportunity({
       waitForEva: true,
       evaTimeoutMs: EVA_WAIT_TIMEOUT_MS,
+      debug: {
+        enabled: process.env.EMAIL_MATCH_DEBUG === "1",
+        label: "auto-email-sync-job",
+        includePii: process.env.EMAIL_MATCH_DEBUG_PII === "1",
+        sampleLimit: Number(process.env.EMAIL_MATCH_DEBUG_SAMPLE || 40),
+      },
     });
 
     const finishedAt = new Date();
