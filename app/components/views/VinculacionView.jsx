@@ -283,6 +283,7 @@ function EmailMatchPanel({
   const evaEmailCount = preview?.evaReady === false ? null : preview?.evaSet ?? 0;
   const bothEmailCount = preview?.evaReady === false ? null : preview?.bothSet ?? 0;
   const breakdown = preview?.breakdown || {};
+  const diagnostic = preview?.diagnostic || null;
 
   function toggleSelected(id) {
     setSelectedIds((prev) => {
@@ -365,6 +366,7 @@ function EmailMatchPanel({
             {error}
           </div>
         )}
+        {!loading && diagnostic && <EmailMatchDiagnostic diagnostic={diagnostic} />}
       </div>
 
       <div className="p-5">
@@ -470,6 +472,33 @@ function EmailMatchPanel({
   );
 }
 
+function EmailMatchDiagnostic({ diagnostic }) {
+  const isBlocked = diagnostic.status === "intersections-blocked";
+  const isCleanMiss = diagnostic.status === "no-email-intersections";
+  const boxClass = isBlocked
+    ? "border-amber-200 bg-amber-50 text-amber-900"
+    : isCleanMiss
+      ? "border-slate-200 bg-slate-50 text-slate-700"
+      : "border-emerald-200 bg-emerald-50 text-emerald-900";
+
+  return (
+    <div className={classNames("mt-4 rounded-xl border px-4 py-3", boxClass)}>
+      <div className="text-sm font-black">
+        {diagnostic.message}
+      </div>
+      <div className="mt-2 grid grid-cols-1 gap-2 text-xs font-semibold sm:grid-cols-2 lg:grid-cols-4">
+        <div>Signia activos con email: {formatCount(diagnostic.sources?.signiaWithEmail ?? 0)}</div>
+        <div>Sin EVA comparados: {formatCount(diagnostic.compared?.missingEvaWithEmail ?? 0)}</div>
+        <div>Sin PATH comparados: {formatCount(diagnostic.compared?.missingPathWithEmail ?? 0)}</div>
+        <div>Emails EVA/PATH indexados: {formatCount(diagnostic.sources?.evaEmailsIndexed)} / {formatCount(diagnostic.sources?.pathEmailsIndexed ?? 0)}</div>
+        <div>Hits exactos EVA: {formatCount(diagnostic.intersections?.eva ?? 0)}</div>
+        <div>Hits exactos PATH: {formatCount(diagnostic.intersections?.path ?? 0)}</div>
+        <div>Aplicables: {formatCount(diagnostic.accepted?.records ?? 0)}</div>
+        <div>Bloqueados por dueño activo: {formatCount((diagnostic.blocked?.evaOwnedByOther ?? 0) + (diagnostic.blocked?.pathOwnedByOther ?? 0))}</div>
+      </div>
+    </div>
+  );
+}
 
 function NameMatchPanel({
   preview,
