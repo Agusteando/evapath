@@ -191,13 +191,8 @@ export default function PathSearchView() {
           </button>
         </div>
 
-        <div className="mt-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
-          <div>
-            <span className="font-black text-slate-800">Vista PATH:</span> por defecto se ocultan candidatos con alertas para mantener limpio el directorio. Usa “Todos” o “Con alertas” para revisar y reparar casos operativos.
-          </div>
-          <div className="shrink-0 font-bold text-slate-500">
-            {data.total ?? 0} visibles · {stats.total ?? 0} totales
-          </div>
+        <div className="mt-5 flex justify-end text-xs font-bold text-slate-500">
+          {data.total ?? 0} resultados
         </div>
       </div>
 

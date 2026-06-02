@@ -1,1 +1,1 @@
-Refina reparación inteligente de PATH, consolida duplicados con seguridad y oculta alertas por defecto en el directorio
+Ajusta marca visual de EvaPath y elimina copy operativo interno en PATH

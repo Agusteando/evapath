@@ -73,11 +73,11 @@ export default function Sidebar({ active, onSelect }) {
     <aside className="w-72 bg-[#F8FAFC] border-r border-slate-200 flex flex-col shrink-0">
       <div className="p-6 pb-2">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xl shadow-md">
-            O
+          <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-sm shadow-md">
+            EP
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">
-            Operaciones<span className="text-slate-400 font-medium">HR</span>
+          <h1 className="text-lg font-black tracking-tight text-slate-900 leading-tight">
+            Dictámenes <span className="text-indigo-600">Eva</span><span className="text-emerald-600">Path</span>
           </h1>
         </div>
       </div>
@@ -91,18 +91,30 @@ export default function Sidebar({ active, onSelect }) {
             <ul className="space-y-1">
               {group.items.map((item) => {
                 const isActive = active === item.id;
+                const activeTone =
+                  item.id === "eva"
+                    ? "bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-100"
+                    : item.id === "path"
+                      ? "bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-100"
+                      : "bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100";
+                const iconTone =
+                  item.id === "eva"
+                    ? "text-indigo-600"
+                    : item.id === "path"
+                      ? "text-emerald-600"
+                      : "text-blue-600";
                 return (
                   <li key={item.id}>
                     <button
                       onClick={() => onSelect(item.id)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all duration-200 font-medium ${
                         isActive
-                          ? "bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100"
+                          ? activeTone
                           : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                       }`}
                     >
                       <svg
-                        className={`w-5 h-5 ${isActive ? "text-blue-600" : "text-slate-400"}`}
+                        className={`w-5 h-5 ${isActive ? iconTone : "text-slate-400"}`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"

@@ -61,11 +61,11 @@ export default function Dashboard() {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-50">
         <div className="bg-white p-10 rounded-2xl shadow-xl max-w-sm w-full text-center border border-slate-100">
-          <div className="w-16 h-16 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-4xl shadow-lg mx-auto mb-6">
-            O
+          <div className="w-16 h-16 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-2xl shadow-lg mx-auto mb-6">
+            EP
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 mb-2">
-            Operaciones HR
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 mb-2">
+            Dictámenes <span className="text-indigo-600">Eva</span><span className="text-emerald-600">Path</span>
           </h1>
           <p className="text-sm text-slate-500 mb-8">
             Inicia sesión con tu cuenta de Google Workspace para continuar.

@@ -3,8 +3,8 @@ import { GlobalProvider } from "./contexts/GlobalContext";
 import AuthProvider from "./components/AuthProvider";
 
 export const metadata = {
-  title: "Dashboard Operativo · Signia/EVA/PATH",
-  description: "Búsqueda y vinculación centralizada",
+  title: "Dictámenes EvaPath",
+  description: "Dictámenes centralizados de Eva y Path",
 };
 
 export default function RootLayout({ children }) {
