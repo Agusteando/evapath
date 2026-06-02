@@ -44,10 +44,14 @@ export async function resetEva() {
     eva.status = "init";
     try {
       await eva._start();
+      if (!eva.ready) {
+        throw new Error(`EVA reset finished without ready state. Current status: ${eva.status || "unknown"}`);
+      }
       console.log("[resetEva] Reset sequence completed successfully.");
     } catch (e) {
       eva.status = "error";
       console.error("[resetEva] EVA Reset Error:", e);
+      throw e;
     }
   }
 }
@@ -65,6 +69,9 @@ export function pdfURL(cid, pid, code, c) {
 
 export async function evaStatusSingleton() {
   const eva = getEva();
+  if (typeof eva.getStatus === "function") {
+    return eva.getStatus();
+  }
   return { ready: !!eva.ready, status: eva.status ?? "init" };
 }
 

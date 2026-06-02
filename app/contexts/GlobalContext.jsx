@@ -8,12 +8,35 @@ export function GlobalProvider({ children }) {
 
   const checkEva = async () => {
     try {
-      const res = await fetch("/api/eva-status");
+      const res = await fetch("/api/eva-status", { cache: "no-store" });
       const data = await res.json();
       setEvaStatus(data);
+      return data;
     } catch (e) {
       console.error("Failed to fetch EVA status", e);
+      return null;
     }
+  };
+
+  const refreshEva = async () => {
+    const res = await fetch("/api/eva-refresh", {
+      method: "POST",
+      cache: "no-store",
+    });
+
+    let data = {};
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = {};
+    }
+
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || data.msg || "No se pudo actualizar EVA");
+    }
+
+    const status = await checkEva();
+    return status || data;
   };
 
   useEffect(() => {
@@ -23,7 +46,7 @@ export function GlobalProvider({ children }) {
   }, []);
 
   return (
-    <GlobalContext.Provider value={{ evaStatus, checkEva }}>
+    <GlobalContext.Provider value={{ evaStatus, checkEva, refreshEva }}>
       {children}
     </GlobalContext.Provider>
   );

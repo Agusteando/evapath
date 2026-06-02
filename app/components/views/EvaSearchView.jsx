@@ -12,22 +12,57 @@ function getInitials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+function formatEvaDate(value) {
+  if (!value) return "sin registro";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "sin registro";
+  return date.toLocaleString("es-MX", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function EvaSearchView() {
-  const { evaStatus } = useGlobal();
+  const { evaStatus, refreshEva } = useGlobal();
   const [data, setData] = useState({ users: [], stats: {}, loading: true, lastPage: 1, total: 0 });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [q, setQ] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
 
-  const fetchData = async () => {
-    if (!evaStatus.ready) return;
+  const lastUpdatedLabel = formatEvaDate(evaStatus.lastUpdatedAt);
+  const hasLastUpdated = !!evaStatus.lastUpdatedAt;
+
+  const fetchData = async ({ forceReady = false } = {}) => {
+    if (!forceReady && !evaStatus.ready) return;
     setData((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`/api/evaluatest-users?page=${page}&pageSize=${pageSize}&q=${encodeURIComponent(q)}`);
+      const res = await fetch(`/api/evaluatest-users?page=${page}&pageSize=${pageSize}&q=${encodeURIComponent(q)}`, { cache: "no-store" });
       const json = await res.json();
       setData({ ...json, loading: false });
     } catch (e) {
       setData((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleRefreshEva = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshError("");
+    try {
+      const status = await refreshEva();
+      if (status?.ready) {
+        setPage(1);
+        await fetchData({ forceReady: true });
+      }
+    } catch (e) {
+      setRefreshError(e.message || "No se pudo actualizar EVA");
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -45,6 +80,18 @@ export default function EvaSearchView() {
         <h2 className="text-xl font-bold text-slate-800 mb-2">Conectando con Evaluatest</h2>
         <p className="text-sm">Sincronizando el catálogo de candidatos, esto puede tomar unos segundos.</p>
         <p className="text-xs mt-4 font-mono bg-slate-100 px-3 py-1.5 rounded-md border border-slate-200 shadow-sm">Estado interno: {evaStatus.status}</p>
+        <button
+          type="button"
+          onClick={handleRefreshEva}
+          disabled={refreshing}
+          className="mt-5 inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {refreshing ? "Actualizando EVA..." : "Actualizar EVA"}
+        </button>
+        <p className="mt-3 max-w-md text-center text-xs text-slate-500">
+          Si un dictamen recién generado no aparece, recarga EVA para volver a consultar la información disponible en Evaluatest.
+        </p>
+        {refreshError && <p className="mt-3 text-sm font-semibold text-rose-600">{refreshError}</p>}
       </div>
     );
   }
@@ -52,8 +99,36 @@ export default function EvaSearchView() {
   return (
     <div className="flex flex-col h-full bg-[#FDFDFE] flex-1 overflow-hidden relative">
       <div className="px-8 py-8 border-b border-slate-200 bg-white shadow-sm z-10 relative">
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Directorio EVA</h1>
-        <p className="text-sm text-slate-500 mt-1">Explora todos los candidatos extraídos directamente de la plataforma Evaluatest.</p>
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Directorio EVA</h1>
+            <p className="text-sm text-slate-500 mt-1">Explora todos los candidatos extraídos directamente de la plataforma Evaluatest.</p>
+          </div>
+          <div className="w-full max-w-xl rounded-2xl border border-blue-100 bg-blue-50/70 p-4 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Actualización EVA</p>
+                <p className="mt-1 text-sm font-semibold text-slate-800">
+                  Última actualización: {lastUpdatedLabel}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  {hasLastUpdated
+                    ? `Muestra dictámenes disponibles antes de ${lastUpdatedLabel}. Si no encuentras el dictamen de un candidato, actualiza EVA para recargar la información reciente.`
+                    : "Aún no hay una actualización registrada. Actualiza EVA si necesitas confirmar dictámenes recién generados."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRefreshEva}
+                disabled={refreshing}
+                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {refreshing ? "Actualizando..." : "Actualizar"}
+              </button>
+            </div>
+            {refreshError && <p className="mt-3 text-xs font-semibold text-rose-600">{refreshError}</p>}
+          </div>
+        </div>
       </div>
 
       <div className="px-8 py-4 border-b border-slate-200 bg-slate-50/50">

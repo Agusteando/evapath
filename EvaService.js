@@ -48,6 +48,8 @@ class EvaService {
     this.accessToken  = "";
     this.refreshToken = "";
     this.antiguedad   = 3;
+    this.lastUpdatedAt = null;
+    this.lastUpdatedCount = 0;
 
     this.email              = envEmail;
     this.password           = envPassword;
@@ -108,7 +110,14 @@ class EvaService {
   }
 
   getStatus() {
-    return { ready: this.ready, status: this.status, users: this.results.length };
+    return {
+      ready: this.ready,
+      status: this.status,
+      users: this.results.length,
+      lastUpdatedAt: this.lastUpdatedAt,
+      lastUpdatedCount: this.lastUpdatedCount,
+      cacheWindowMonths: this.antiguedad,
+    };
   }
 
   async _start() {
@@ -730,6 +739,8 @@ class EvaService {
         acc[`${r.N} *${r.puesto}*`] = r;
         return acc;
       }, {});
+    this.lastUpdatedAt = new Date().toISOString();
+    this.lastUpdatedCount = this.results.length;
     this._log(`precargar done, cache built with ${Object.keys(this.cache).length} recent candidates`);
   }
 
