@@ -81,3 +81,108 @@ async function getEvaDictamen(baseUrl, signiaId) {
   return pdfResponse.arrayBuffer();
 }
 ```
+
+## Public EVA API for tgbot
+
+These endpoints are also intentionally tokenless and are read-only. They are designed so external consumers such as `tgbot` can use EvaPath as the single EVA service instead of launching their own Puppeteer/Evaluatest session.
+
+### Status
+
+```http
+GET /api/public/eva/status
+GET /api/public/eva/status?wait=1
+```
+
+Returns the current EVA cache status:
+
+```json
+{
+  "ok": true,
+  "ready": true,
+  "status": "ready",
+  "users": 123,
+  "lastUpdatedAt": "2026-06-02T18:00:00.000Z",
+  "lastUpdatedCount": 123,
+  "cacheWindowMonths": 3
+}
+```
+
+### Search candidates
+
+```http
+GET /api/public/eva/search?q=nombre%20correo%20puesto&months=3&limit=30
+GET /api/public/eva/search?mode=recent&evaluated=1&limit=15
+```
+
+The response returns normalized candidate rows compatible with the bot flow:
+
+```json
+{
+  "ok": true,
+  "ready": true,
+  "total": 1,
+  "count": 1,
+  "items": [
+    {
+      "CID": 123,
+      "JID": 456,
+      "N": "Nombre Candidato",
+      "M": "correo@example.com",
+      "D": "Evaluado",
+      "PD": "2026-06-02",
+      "JN": "Puesto",
+      "key": "Nombre Candidato *Puesto*",
+      "dictamenEndpoint": "https://evapath.example.com/api/public/eva/candidates/123/dictamen"
+    }
+  ]
+}
+```
+
+By default the search uses the current EVA cache window, normally 3 months. Use `all=1` only for trusted internal callers that need to search every candidate currently loaded in memory.
+
+### Check or download a candidate dictamen
+
+```http
+GET /api/public/eva/candidates/{cid}/available
+GET /api/public/eva/candidates/{cid}/dictamen
+```
+
+The `dictamen` endpoint waits for EVA to be ready and then streams `application/pdf`. It returns JSON errors for not-ready, not-found, not-evaluated, or download-failed states. Clients should use a long timeout, normally 4 to 5 minutes.
+
+### Public EVA operations for tgbot
+
+These endpoints are intentionally tokenless because `tgbot` is being downgraded to a relay. EvaPath remains the only process that talks to Evaluatest.
+
+```http
+GET /api/public/eva/puestos?q=<filtro>&limit=100
+GET /api/public/eva/puestos/{puestoId}
+POST /api/public/eva/invite
+POST /api/public/eva/postulacion
+```
+
+`/invite` posts the candidate to EVA and sends the Evaluatest invitation email. `/postulacion` posts the candidate to EVA without sending the email unless `sendEmail: true` is explicitly provided.
+
+Body:
+
+```json
+{
+  "name": "Nombre Candidato",
+  "email": "correo@example.com",
+  "puestoId": 23490
+}
+```
+
+Successful response:
+
+```json
+{
+  "ok": true,
+  "success": true,
+  "system": "EVA",
+  "action": "invite",
+  "puestoId": 23490,
+  "evalCode": "ABC123",
+  "link": "https://...",
+  "emailSent": true
+}
+```
