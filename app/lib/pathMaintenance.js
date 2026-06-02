@@ -261,22 +261,28 @@ export function buildPathHealthRow(candidate, pruebas, context) {
   if (new Set(assignedCodes).size > 1) problemCodes.push("PRUEBA_CODE_MISMATCH");
 
   const canRepairTests = Boolean(
-    canonicalPuestoId &&
-      (
-        !eco.assigned ||
-        !mmpi.assigned ||
-        catalogos.some((item) => item.missingCode || item.missingPuesto)
-      ),
+    !eco.assigned ||
+      !mmpi.assigned ||
+      catalogos.some((item) => item.missingCode || item.missingPuesto || item.duplicateCount > 0)
   );
-  const canRepairSignia = Boolean(linkState.canLinkByEmail);
-  const canSafeRepair = Boolean(canRepairTests || canRepairSignia);
-  const needsPuestoForRepair = Boolean((!eco.assigned || !mmpi.assigned) && !canonicalPuestoId);
+  const canRepairSignia = Boolean(linkState.canLinkByEmail || linkState.state === "conflict");
+  const canRepairDuplicates = Boolean(duplicateEmailGroup.length > 1);
+  const canSafeRepair = Boolean(canRepairTests || canRepairSignia || canRepairDuplicates);
+  const needsPuestoForRepair = false;
   const canResend = Boolean(email && isValidEmail(email) && canonicalCode && Number.isFinite(Number(canonicalCode)) && nombre && nombre !== "Sin nombre");
 
   const pathLinks = linkedCatalogos.map((item) => ({
     label: item.label,
     url: item.primary.url,
   }));
+  let inviteLink = null;
+  if (canonicalCode && Number.isFinite(Number(canonicalCode))) {
+    try {
+      inviteLink = buildInviteLink(candidate.id, canonicalCode).link;
+    } catch {
+      inviteLink = null;
+    }
+  }
 
   return {
     id: candidate.id,
@@ -297,7 +303,7 @@ export function buildPathHealthRow(candidate, pruebas, context) {
       canonicalPuestoId: canonicalPuestoId || null,
     },
     pathLinks,
-    inviteLink: canonicalCode ? buildInviteLink(candidate.id, canonicalCode).link : null,
+    inviteLink,
     duplicateCandidateIds: duplicateEmailGroup.map((row) => row.id).filter((id) => Number(id) !== Number(candidate.id)),
     problemCodes: [...new Set(problemCodes)],
     canSafeRepair,
@@ -367,6 +373,7 @@ function filterHealthRows(rows, { q = "", status = "all" } = {}) {
     list = list.filter((row) => `${row.nombre} ${row.email} ${row.id}`.toLowerCase().includes(term));
   }
 
+  if (status === "healthy") list = list.filter((row) => row.problemCodes.length === 0);
   if (status === "registered") list = list.filter((row) => row.registered);
   if (status === "unregistered") list = list.filter((row) => !row.registered);
   if (status === "linked") list = list.filter((row) => row.linkState.state === "linked");
@@ -400,7 +407,7 @@ export function summarizePathHealth(rows) {
   };
 }
 
-export async function getPathHealthPage({ q = "", status = "all", page = 1, pageSize = 20 } = {}) {
+export async function getPathHealthPage({ q = "", status = "healthy", page = 1, pageSize = 20 } = {}) {
   const allRows = await getPathHealthRows();
   const filtered = filterHealthRows(allRows, { q, status });
   const numericPageSize = Math.max(5, Math.min(parsePositiveInt(pageSize) || 20, 100));
@@ -432,6 +439,19 @@ async function fetchCandidateForRepair(connection, candidatoId) {
   return candidateRows?.[0] || null;
 }
 
+async function fetchCandidatesByEmail(connection, emailKey) {
+  if (!emailKey) return [];
+  const [rows] = await connection.query(
+    `SELECT id, email, nombres, apellidopaterno, apellidomaterno,
+            CONCAT_WS(' ', nombres, apellidopaterno, apellidomaterno) AS nombre
+       FROM candidatos
+      WHERE LOWER(TRIM(email)) = ?
+      ORDER BY id DESC`,
+    [emailKey],
+  );
+  return rows || [];
+}
+
 async function fetchPruebasForCandidate(connection, candidatoId) {
   const [rows] = await connection.query(
     `SELECT candidato_id, id AS pid, puesto_id, code, catalogo_id, completada, pubdate
@@ -441,6 +461,302 @@ async function fetchPruebasForCandidate(connection, candidatoId) {
     [candidatoId],
   );
   return rows || [];
+}
+
+async function fetchPruebasForCandidates(connection, candidatoIds) {
+  const ids = [...new Set((candidatoIds || []).map((value) => parsePositiveInt(value)).filter(Boolean))];
+  const map = new Map();
+  ids.forEach((id) => map.set(id, []));
+  if (!ids.length) return map;
+
+  const [rows] = await connection.query(
+    `SELECT candidato_id, id AS pid, puesto_id, code, catalogo_id, completada, pubdate
+       FROM pruebas
+      WHERE candidato_id IN (${ids.map(() => "?").join(",")})
+      ORDER BY pubdate DESC, id DESC`,
+    ids,
+  );
+
+  for (const row of rows || []) {
+    const id = Number(row.candidato_id);
+    if (!map.has(id)) map.set(id, []);
+    map.get(id).push(row);
+  }
+  return map;
+}
+
+async function fetchActiveSigniaUsersByEmail(signiaDB, emailKey) {
+  if (!emailKey) return [];
+  const [users] = await signiaDB.query(
+    `SELECT id, email, name, pathId
+       FROM user
+      WHERE isActive = 1 AND LOWER(TRIM(email)) = ?
+      ORDER BY id DESC`,
+    [emailKey],
+  );
+  return users || [];
+}
+
+function hasCompletedReport(row) {
+  return Boolean(row && Number(row.completada) === 1 && hasLinkValue(row.code));
+}
+
+function hasAnyPruebaEvidence(row) {
+  return Boolean(row && (hasLinkValue(row.code) || hasLinkValue(row.puesto_id) || hasCompletedReport(row)));
+}
+
+function catalogCompleteness(pruebas = []) {
+  const catalogos = new Map();
+  for (const catalogoId of PATH_CATALOGOS) {
+    const rows = pruebas.filter((row) => Number(row.catalogo_id) === Number(catalogoId));
+    catalogos.set(catalogoId, {
+      rows,
+      primary: pickPrimaryPrueba(rows),
+      completed: rows.filter(hasCompletedReport).length,
+      coded: rows.filter((row) => hasLinkValue(row.code)).length,
+      withPuesto: rows.filter((row) => hasLinkValue(row.puesto_id)).length,
+    });
+  }
+  return catalogos;
+}
+
+function candidateRepairScore(candidate, pruebas = [], signiaUsers = []) {
+  const catalogos = catalogCompleteness(pruebas);
+  const completedCatalogs = PATH_CATALOGOS.filter((catalogoId) => catalogos.get(catalogoId).completed > 0).length;
+  const assignedCatalogs = PATH_CATALOGOS.filter((catalogoId) => catalogos.get(catalogoId).rows.length > 0).length;
+  const codedCatalogs = PATH_CATALOGOS.filter((catalogoId) => catalogos.get(catalogoId).coded > 0).length;
+  const puestoCatalogs = PATH_CATALOGOS.filter((catalogoId) => catalogos.get(catalogoId).withPuesto > 0).length;
+  const linkedBySignia = signiaUsers.some((user) => String(user.pathId || "") === String(candidate.id));
+
+  return {
+    completedCatalogs,
+    assignedCatalogs,
+    codedCatalogs,
+    puestoCatalogs,
+    linkedBySignia,
+    totalPruebas: pruebas.length,
+    value:
+      completedCatalogs * 1000 +
+      assignedCatalogs * 160 +
+      codedCatalogs * 80 +
+      puestoCatalogs * 60 +
+      (linkedBySignia ? 40 : 0) +
+      Math.min(pruebas.length, 20),
+  };
+}
+
+function pickCanonicalCandidate(candidates, pruebasByCandidate, signiaUsers) {
+  const group = [...(candidates || [])].filter(Boolean);
+  if (!group.length) return null;
+
+  const scored = group.map((candidate) => ({
+    candidate,
+    pruebas: pruebasByCandidate.get(Number(candidate.id)) || [],
+    score: candidateRepairScore(candidate, pruebasByCandidate.get(Number(candidate.id)) || [], signiaUsers),
+  }));
+
+  scored.sort((a, b) => {
+    const completedDelta = b.score.completedCatalogs - a.score.completedCatalogs;
+    if (completedDelta) return completedDelta;
+    const assignedDelta = b.score.assignedCatalogs - a.score.assignedCatalogs;
+    if (assignedDelta) return assignedDelta;
+    const codedDelta = b.score.codedCatalogs - a.score.codedCatalogs;
+    if (codedDelta) return codedDelta;
+    const valueDelta = b.score.value - a.score.value;
+    if (valueDelta) return valueDelta;
+    return Number(b.candidate.id) - Number(a.candidate.id);
+  });
+
+  const strongest = scored[0];
+  const signiaLinked = scored.filter((item) => item.score.linkedBySignia);
+  if (!signiaLinked.length) return strongest.candidate;
+
+  signiaLinked.sort((a, b) => b.score.value - a.score.value || Number(b.candidate.id) - Number(a.candidate.id));
+  const currentLinked = signiaLinked[0];
+
+  if (strongest.score.completedCatalogs > currentLinked.score.completedCatalogs) return strongest.candidate;
+  if (currentLinked.score.completedCatalogs > 0 && strongest.score.completedCatalogs === currentLinked.score.completedCatalogs) {
+    return currentLinked.candidate;
+  }
+  if (strongest.score.assignedCatalogs > currentLinked.score.assignedCatalogs) return strongest.candidate;
+  return currentLinked.candidate;
+}
+
+function inferCanonicalCode(pruebas = []) {
+  const completed = sortPruebas(pruebas).find(hasCompletedReport);
+  if (completed?.code && Number.isFinite(Number(completed.code))) return completed.code;
+
+  const coded = sortPruebas(pruebas).find((row) => hasLinkValue(row.code) && Number.isFinite(Number(row.code)));
+  if (coded?.code) return coded.code;
+
+  return Date.now();
+}
+
+function inferCanonicalPuestoId({ explicitPuestoId, canonicalPruebas = [], groupPruebas = [] }) {
+  if (explicitPuestoId) return explicitPuestoId;
+
+  const fromCanonical = sortPruebas(canonicalPruebas).find((row) => hasLinkValue(row.puesto_id) && parsePositiveInt(row.puesto_id));
+  if (fromCanonical) return parsePositiveInt(fromCanonical.puesto_id);
+
+  const fromGroup = sortPruebas(groupPruebas).find((row) => hasLinkValue(row.puesto_id) && parsePositiveInt(row.puesto_id));
+  if (fromGroup) return parsePositiveInt(fromGroup.puesto_id);
+
+  return PATH_DEFAULT_PUESTO_ID;
+}
+
+async function deleteEmptyDuplicateCandidate(connection, duplicateId, actions) {
+  const [result] = await connection.query(
+    `DELETE FROM candidatos
+      WHERE id = ?
+        AND NOT EXISTS (SELECT 1 FROM pruebas WHERE candidato_id = ?)`,
+    [duplicateId, duplicateId],
+  );
+  if (result.affectedRows > 0) actions.push(`Candidato duplicado PATH #${duplicateId} eliminado porque no tenía pruebas.`);
+}
+
+async function consolidateDuplicateCandidates({ connection, canonicalId, candidates, pruebasByCandidate, actions, unresolved }) {
+  for (const duplicate of candidates) {
+    const duplicateId = Number(duplicate.id);
+    if (duplicateId === Number(canonicalId)) continue;
+
+    const duplicatePruebas = pruebasByCandidate.get(duplicateId) || [];
+    if (!duplicatePruebas.length) {
+      await deleteEmptyDuplicateCandidate(connection, duplicateId, actions);
+      continue;
+    }
+
+    const completedRows = duplicatePruebas.filter(hasCompletedReport);
+    const movableRows = duplicatePruebas.filter((row) => !hasCompletedReport(row));
+
+    if (movableRows.length) {
+      await connection.query(
+        `UPDATE pruebas
+            SET candidato_id = ?
+          WHERE candidato_id = ?
+            AND (completada IS NULL OR completada <> 1 OR code IS NULL OR code = '')`,
+        [canonicalId, duplicateId],
+      );
+      actions.push(`${movableRows.length} prueba(s) incompletas movidas de PATH #${duplicateId} a PATH #${canonicalId}.`);
+    }
+
+    if (completedRows.length) {
+      unresolved.push(
+        `PATH #${duplicateId} conserva ${completedRows.length} dictamen(es) ya generados; no se movieron para no romper PDFs históricos.`,
+      );
+      continue;
+    }
+
+    await deleteEmptyDuplicateCandidate(connection, duplicateId, actions);
+  }
+}
+
+async function repairPruebasForCanonical({ connection, canonicalId, canonicalPuestoId, canonicalCode, actions, unresolved }) {
+  const pruebas = await fetchPruebasForCandidate(connection, canonicalId);
+  const canonicalCodeValue = Number.isFinite(Number(canonicalCode)) ? canonicalCode : Date.now();
+
+  for (const catalogoId of PATH_CATALOGOS) {
+    const catalogRows = sortPruebas(pruebas.filter((row) => Number(row.catalogo_id) === Number(catalogoId)));
+    const primary = pickPrimaryPrueba(catalogRows);
+
+    if (!primary) {
+      await connection.query(
+        `INSERT INTO pruebas (candidato_id, puesto_id, code, catalogo_id)
+         VALUES (?, ?, ?, ?)`,
+        [canonicalId, canonicalPuestoId, canonicalCodeValue, catalogoId],
+      );
+      actions.push(`Prueba ${pathLabel(catalogoId)} creada para PATH #${canonicalId} con puesto ${canonicalPuestoId}.`);
+      continue;
+    }
+
+    const updateFields = [];
+    const updateValues = [];
+    if (!hasLinkValue(primary.code)) {
+      updateFields.push("code = ?");
+      updateValues.push(canonicalCodeValue);
+    }
+    if (!hasLinkValue(primary.puesto_id)) {
+      updateFields.push("puesto_id = ?");
+      updateValues.push(canonicalPuestoId);
+    }
+
+    if (updateFields.length) {
+      updateValues.push(primary.pid || primary.id);
+      await connection.query(`UPDATE pruebas SET ${updateFields.join(", ")} WHERE id = ?`, updateValues);
+      actions.push(`Prueba ${pathLabel(catalogoId)} reparada sin cambiar completada.`);
+    }
+
+    const duplicateRows = catalogRows.filter((row) => Number(row.pid || row.id) !== Number(primary.pid || primary.id));
+    const safeDeleteIds = duplicateRows
+      .filter((row) => !hasCompletedReport(row))
+      .map((row) => Number(row.pid || row.id))
+      .filter(Boolean);
+
+    if (safeDeleteIds.length) {
+      await connection.query(
+        `DELETE FROM pruebas WHERE id IN (${safeDeleteIds.map(() => "?").join(",")})`,
+        safeDeleteIds,
+      );
+      actions.push(`${safeDeleteIds.length} prueba(s) duplicadas ${pathLabel(catalogoId)} incompletas eliminadas.`);
+    }
+
+    const protectedCompleted = duplicateRows.filter(hasCompletedReport);
+    if (protectedCompleted.length) {
+      unresolved.push(
+        `${protectedCompleted.length} prueba(s) ${pathLabel(catalogoId)} completadas duplicadas se conservaron para no romper PDFs históricos.`,
+      );
+    }
+  }
+}
+
+async function repairSigniaLink({ signiaDB, emailKey, canonicalId, groupCandidateIds, actions, unresolved }) {
+  const users = await fetchActiveSigniaUsersByEmail(signiaDB, emailKey);
+  if (!users.length) {
+    unresolved.push("No existe usuario activo en Signia con el mismo correo; no se creó un usuario nuevo automáticamente.");
+    return users;
+  }
+
+  if (users.length > 1) {
+    const linkedInsideGroup = users.filter((user) => groupCandidateIds.includes(Number(user.pathId)));
+    if (linkedInsideGroup.length === 1 && users.every((user) => !hasLinkValue(user.pathId) || Number(user.pathId) === Number(linkedInsideGroup[0].pathId))) {
+      // This is still deterministic: all duplicates point to the same PATH id or are blank.
+    } else {
+      unresolved.push("Hay varios usuarios activos en Signia con el mismo correo; no se reescribió el vínculo automáticamente.");
+      return users;
+    }
+  }
+
+  for (const signiaUser of users) {
+    if (!hasLinkValue(signiaUser.pathId)) {
+      await signiaDB.query(
+        `UPDATE user
+            SET pathId = ?
+          WHERE id = ? AND isActive = 1 AND (pathId IS NULL OR pathId = 0 OR pathId = '')`,
+        [canonicalId, signiaUser.id],
+      );
+      actions.push(`Usuario Signia #${signiaUser.id} vinculado a PATH #${canonicalId}.`);
+      continue;
+    }
+
+    if (Number(signiaUser.pathId) === Number(canonicalId)) {
+      actions.push(`Usuario Signia #${signiaUser.id} ya apuntaba al PATH canónico #${canonicalId}.`);
+      continue;
+    }
+
+    if (groupCandidateIds.includes(Number(signiaUser.pathId))) {
+      await signiaDB.query(
+        `UPDATE user
+            SET pathId = ?
+          WHERE id = ? AND isActive = 1 AND pathId = ?`,
+        [canonicalId, signiaUser.id, signiaUser.pathId],
+      );
+      actions.push(`Usuario Signia #${signiaUser.id} redirigido de PATH #${signiaUser.pathId} a PATH canónico #${canonicalId}.`);
+      continue;
+    }
+
+    unresolved.push(`El usuario Signia #${signiaUser.id} apunta a PATH #${signiaUser.pathId}, fuera del grupo duplicado; no se sobrescribió.`);
+  }
+
+  return users;
 }
 
 export async function repairPathCandidate({ candidatoId, puestoId, user } = {}) {
@@ -453,6 +769,11 @@ export async function repairPathCandidate({ candidatoId, puestoId, user } = {}) 
   const actions = [];
   const unresolved = [];
   let candidate = null;
+  let canonical = null;
+  let groupCandidates = [];
+  let groupCandidateIds = [];
+  let canonicalPuestoId = null;
+  let canonicalCode = null;
 
   const connection = await pathDB.getConnection();
   try {
@@ -460,55 +781,38 @@ export async function repairPathCandidate({ candidatoId, puestoId, user } = {}) 
     candidate = await fetchCandidateForRepair(connection, id);
     if (!candidate) throw new Error(`No se encontró el candidato PATH #${id}.`);
 
-    const pruebas = await fetchPruebasForCandidate(connection, id);
-    const canonicalPrueba = pickPrimaryPrueba(pruebas);
-    const canonicalCode = canonicalPrueba?.code || pruebas.find((row) => hasLinkValue(row.code))?.code || Date.now();
-    const canonicalPuestoId =
-      explicitPuestoId ||
-      canonicalPrueba?.puesto_id ||
-      pruebas.find((row) => hasLinkValue(row.puesto_id))?.puesto_id ||
-      null;
+    const emailKey = normalizeEmail(candidate.email);
+    groupCandidates = emailKey && isValidEmail(candidate.email)
+      ? await fetchCandidatesByEmail(connection, emailKey)
+      : [candidate];
+    if (!groupCandidates.some((row) => Number(row.id) === id)) groupCandidates.push(candidate);
+    groupCandidateIds = [...new Set(groupCandidates.map((row) => Number(row.id)).filter(Boolean))];
 
-    if (!canonicalPuestoId) {
-      unresolved.push("No se pudo crear pruebas faltantes porque el candidato no tiene puesto_id histórico. Indica un puesto PATH válido.");
+    const pruebasByCandidate = await fetchPruebasForCandidates(connection, groupCandidateIds);
+    const signiaUsers = emailKey && isValidEmail(candidate.email) ? await fetchActiveSigniaUsersByEmail(signiaDB, emailKey) : [];
+    canonical = pickCanonicalCandidate(groupCandidates, pruebasByCandidate, signiaUsers) || candidate;
+    const canonicalId = Number(canonical.id);
+
+    const canonicalPruebas = pruebasByCandidate.get(canonicalId) || [];
+    const allGroupPruebas = groupCandidateIds.flatMap((candidateId) => pruebasByCandidate.get(candidateId) || []);
+    canonicalCode = inferCanonicalCode(canonicalPruebas.length ? canonicalPruebas : allGroupPruebas);
+    canonicalPuestoId = inferCanonicalPuestoId({
+      explicitPuestoId,
+      canonicalPruebas,
+      groupPruebas: allGroupPruebas,
+    });
+
+    if (canonicalPuestoId === PATH_DEFAULT_PUESTO_ID && !explicitPuestoId && !allGroupPruebas.some((row) => hasLinkValue(row.puesto_id))) {
+      actions.push(`Sin puesto histórico; se aplicó el puesto PATH default #${PATH_DEFAULT_PUESTO_ID}.`);
     }
 
-    for (const catalogoId of PATH_CATALOGOS) {
-      const catalogRows = sortPruebas(pruebas.filter((row) => Number(row.catalogo_id) === Number(catalogoId)));
-      const primary = pickPrimaryPrueba(catalogRows);
-
-      if (!primary) {
-        if (!canonicalPuestoId) continue;
-        await connection.query(
-          `INSERT INTO pruebas (candidato_id, puesto_id, code, catalogo_id)
-           VALUES (?, ?, ?, ?)`,
-          [id, canonicalPuestoId, canonicalCode, catalogoId],
-        );
-        actions.push(`Prueba ${pathLabel(catalogoId)} creada con puesto ${canonicalPuestoId}.`);
-        continue;
-      }
-
-      const updateFields = [];
-      const updateValues = [];
-      if (!hasLinkValue(primary.code)) {
-        updateFields.push("code = ?");
-        updateValues.push(canonicalCode);
-      }
-      if (!hasLinkValue(primary.puesto_id) && canonicalPuestoId) {
-        updateFields.push("puesto_id = ?");
-        updateValues.push(canonicalPuestoId);
-      }
-
-      if (updateFields.length) {
-        updateValues.push(primary.pid || primary.id);
-        await connection.query(`UPDATE pruebas SET ${updateFields.join(", ")} WHERE id = ?`, updateValues);
-        actions.push(`Prueba ${pathLabel(catalogoId)} reparada sin cambiar completada.`);
-      }
-
-      if (catalogRows.length > 1) {
-        unresolved.push(`Hay ${catalogRows.length} registros de prueba ${pathLabel(catalogoId)}; no se eliminó ninguno automáticamente.`);
-      }
+    if (groupCandidateIds.length > 1) {
+      actions.push(`Grupo duplicado por correo revisado: ${groupCandidateIds.map((candidateId) => `PATH #${candidateId}`).join(", ")}.`);
+      actions.push(`PATH #${canonicalId} seleccionado como registro canónico.`);
+      await consolidateDuplicateCandidates({ connection, canonicalId, candidates: groupCandidates, pruebasByCandidate, actions, unresolved });
     }
+
+    await repairPruebasForCanonical({ connection, canonicalId, canonicalPuestoId, canonicalCode, actions, unresolved });
 
     await connection.commit();
   } catch (error) {
@@ -520,56 +824,44 @@ export async function repairPathCandidate({ candidatoId, puestoId, user } = {}) 
 
   const emailKey = normalizeEmail(candidate?.email);
   if (emailKey && isValidEmail(candidate.email)) {
-    const [users] = await signiaDB.query(
-      `SELECT id, email, name, pathId
-         FROM user
-        WHERE isActive = 1 AND LOWER(TRIM(email)) = ?`,
-      [emailKey],
-    );
-
-    if (!users?.length) {
-      unresolved.push("No hay usuario activo en Signia con el mismo correo.");
-    } else if (users.length > 1) {
-      unresolved.push("Hay varios usuarios activos en Signia con el mismo correo; no se vinculó automáticamente.");
-    } else {
-      const [signiaUser] = users;
-      if (!hasLinkValue(signiaUser.pathId)) {
-        await signiaDB.query(
-          `UPDATE user
-              SET pathId = ?
-            WHERE id = ? AND isActive = 1 AND (pathId IS NULL OR pathId = 0 OR pathId = '')`,
-          [id, signiaUser.id],
-        );
-        actions.push(`Usuario Signia #${signiaUser.id} vinculado a PATH #${id}.`);
-      } else if (String(signiaUser.pathId) === String(id)) {
-        actions.push(`Usuario Signia #${signiaUser.id} ya estaba vinculado a PATH #${id}.`);
-      } else {
-        unresolved.push(`El usuario Signia #${signiaUser.id} ya apunta a PATH #${signiaUser.pathId}; no se sobrescribió.`);
-      }
-    }
+    await repairSigniaLink({
+      signiaDB,
+      emailKey,
+      canonicalId: Number(canonical?.id || id),
+      groupCandidateIds,
+      actions,
+      unresolved,
+    });
   } else {
-    unresolved.push("El candidato no tiene un correo válido para reparación de vínculo Signia.");
+    unresolved.push("El candidato no tiene un correo válido para reparar vínculo Signia.");
   }
 
   await logAudit(user, "PATH_REPAIR_CANDIDATE", { id, name: buildCandidateName(candidate), email: candidate?.email }, "PATH", "SUCCESS", {
     actions,
     unresolved,
-    puestoId: explicitPuestoId || null,
+    canonicalId: canonical?.id || id,
+    puestoId: explicitPuestoId || canonicalPuestoId || null,
+    code: canonicalCode || null,
   });
 
-  return { candidatoId: id, actions, unresolved };
+  return { candidatoId: id, canonicalId: canonical?.id || id, actions, unresolved };
 }
 
 export async function repairPathBulk({ limit = 250, user } = {}) {
   const rows = await getPathHealthRows();
   const targets = rows
-    .filter((row) => row.canSafeRepair)
+    .filter((row) => row.problemCodes.length > 0 || row.canSafeRepair)
     .slice(0, Math.max(1, Math.min(parsePositiveInt(limit) || 250, 500)));
 
+  const seen = new Set();
   const repaired = [];
   const failed = [];
 
   for (const row of targets) {
+    const key = row.emailKey || `id:${row.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
     try {
       const result = await repairPathCandidate({ candidatoId: row.id, user });
       repaired.push(result);
@@ -578,13 +870,13 @@ export async function repairPathBulk({ limit = 250, user } = {}) {
     }
   }
 
-  await logAudit(user, "PATH_SAFE_CLEANUP", { id: "bulk", name: "PATH", email: null }, "PATH", failed.length ? "PARTIAL" : "SUCCESS", {
-    attempted: targets.length,
+  await logAudit(user, "PATH_SMART_REPAIR", { id: "bulk", name: "PATH", email: null }, "PATH", failed.length ? "PARTIAL" : "SUCCESS", {
+    attempted: seen.size,
     repaired: repaired.length,
     failed: failed.length,
   });
 
-  return { attempted: targets.length, repaired, failed };
+  return { attempted: seen.size, repaired, failed };
 }
 
 export async function resendPathInvite({ candidatoId, user } = {}) {

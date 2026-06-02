@@ -10,15 +10,15 @@ function getInitials(name) {
 }
 
 const FILTERS = [
+  { id: "healthy", label: "Sin alertas" },
   { id: "all", label: "Todos" },
   { id: "registered", label: "Registrados" },
   { id: "unregistered", label: "No registrados" },
   { id: "linked", label: "Vinculados" },
   { id: "ready", label: "Con dictámenes" },
   { id: "incomplete", label: "Incompletos" },
-  { id: "repairable", label: "Reparables" },
   { id: "duplicates", label: "Duplicados" },
-  { id: "broken", label: "Alertas" },
+  { id: "broken", label: "Con alertas" },
 ];
 
 const PROBLEM_LABELS = {
@@ -38,23 +38,6 @@ const PROBLEM_LABELS = {
   MISSING_PUESTO_ID: "Sin puesto",
   PRUEBA_CODE_MISMATCH: "Códigos distintos",
 };
-
-function StatCard({ label, value, tone = "slate" }) {
-  const tones = {
-    slate: "bg-white border-slate-200 text-slate-900",
-    emerald: "bg-emerald-50 border-emerald-200 text-emerald-900",
-    amber: "bg-amber-50 border-amber-200 text-amber-900",
-    rose: "bg-rose-50 border-rose-200 text-rose-900",
-    blue: "bg-blue-50 border-blue-200 text-blue-900",
-  };
-
-  return (
-    <div className={`rounded-xl border px-4 py-3 shadow-sm ${tones[tone] || tones.slate}`}>
-      <div className="text-[11px] font-bold uppercase tracking-wider opacity-60">{label}</div>
-      <div className="text-2xl font-black mt-0.5">{value ?? 0}</div>
-    </div>
-  );
-}
 
 function StatusBadge({ row }) {
   const state = row.linkState?.state;
@@ -122,8 +105,7 @@ export default function PathSearchView() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("all");
-  const [puestoInputs, setPuestoInputs] = useState({});
+  const [status, setStatus] = useState("healthy");
   const [actionState, setActionState] = useState({ loading: false, message: "", error: "" });
 
   const fetchData = async () => {
@@ -155,8 +137,8 @@ export default function PathSearchView() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "No se pudo completar la acción.");
-      const unresolved = json.unresolved?.length ? ` Pendiente: ${json.unresolved.join(" ")}` : "";
-      const bulkDetail = json.mode === "bulk" ? ` (${json.repaired?.length || 0}/${json.attempted || 0} reparados)` : "";
+      const unresolved = json.unresolved?.length ? ` Observaciones: ${json.unresolved.join(" ")}` : "";
+      const bulkDetail = json.mode === "bulk" ? ` (${json.repaired?.length || 0}/${json.attempted || 0} grupos revisados)` : "";
       setActionState({ loading: false, message: `${successMessage}${bulkDetail}.${unresolved}`, error: "" });
       await fetchData();
     } catch (e) {
@@ -167,7 +149,7 @@ export default function PathSearchView() {
   const repairCandidate = (row) => {
     runAction(
       "/api/path-health/repair",
-      { candidatoId: row.id, puestoId: puestoInputs[row.id] || undefined },
+      { candidatoId: row.id },
       `PATH #${row.id} revisado y reparado de forma segura`,
     );
   };
@@ -184,7 +166,7 @@ export default function PathSearchView() {
     runAction(
       "/api/path-health/repair",
       { mode: "bulk", limit: 250 },
-      "Limpieza segura de PATH completada",
+      "Reparación inteligente de PATH completada",
     );
   };
 
@@ -202,26 +184,20 @@ export default function PathSearchView() {
           </div>
           <button
             onClick={bulkCleanup}
-            disabled={actionState.loading || !stats.repairable}
+            disabled={actionState.loading}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            {actionState.loading ? "Procesando..." : "Limpiar / reparar PATH"}
+            {actionState.loading ? "Procesando..." : "Reparar PATH"}
           </button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mt-6">
-          <StatCard label="Candidatos" value={stats.total} />
-          <StatCard label="Registrados" value={stats.registered} tone="blue" />
-          <StatCard label="No registrados" value={stats.unregistered} />
-          <StatCard label="Vinculados" value={stats.linked} tone="emerald" />
-          <StatCard label="Con dictámenes" value={stats.complete} tone="emerald" />
-          <StatCard label="Incompletos" value={stats.incomplete} tone="amber" />
-          <StatCard label="Reparables" value={stats.repairable} tone="amber" />
-          <StatCard label="Duplicados" value={stats.duplicates} tone="rose" />
-        </div>
-
-        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <span className="font-black">Reparación segura:</span> el botón global vincula por correo cuando no hay conflicto y crea o completa pruebas faltantes cuando PATH ya tiene un puesto válido. Los duplicados se detectan, pero no se eliminan automáticamente.
+        <div className="mt-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
+          <div>
+            <span className="font-black text-slate-800">Vista PATH:</span> por defecto se ocultan candidatos con alertas para mantener limpio el directorio. Usa “Todos” o “Con alertas” para revisar y reparar casos operativos.
+          </div>
+          <div className="shrink-0 font-bold text-slate-500">
+            {data.total ?? 0} visibles · {stats.total ?? 0} totales
+          </div>
         </div>
       </div>
 
@@ -327,19 +303,7 @@ export default function PathSearchView() {
 
                     <td className="px-6 py-4">
                       <ProblemChips codes={u.problemCodes} />
-                      {u.needsPuestoForRepair && (
-                        <div className="mt-3">
-                          <input
-                            type="number"
-                            min="1"
-                            placeholder="Puesto PATH"
-                            value={puestoInputs[u.id] || ""}
-                            onChange={(e) => setPuestoInputs((prev) => ({ ...prev, [u.id]: e.target.value }))}
-                            className="w-32 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-200"
-                          />
-                          <div className="mt-1 text-[10px] font-semibold text-amber-700">Necesario para crear pruebas faltantes.</div>
-                        </div>
-                      )}
+
                     </td>
 
                     <td className="px-6 py-4 text-center">
@@ -362,7 +326,7 @@ export default function PathSearchView() {
                       <div className="flex flex-col items-end gap-2">
                         <button
                           onClick={() => repairCandidate(u)}
-                          disabled={actionState.loading || (!u.canSafeRepair && !u.needsPuestoForRepair)}
+                          disabled={actionState.loading || !u.canSafeRepair}
                           className="inline-flex w-36 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           Reparar

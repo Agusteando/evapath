@@ -11,7 +11,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const payload = await getPathHealthPage({
       q: searchParams.get("q") || "",
-      status: searchParams.get("status") || "all",
+      status: searchParams.get("status") || "healthy",
       page: searchParams.get("page") || 1,
       pageSize: searchParams.get("pageSize") || 20,
     });
