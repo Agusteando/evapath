@@ -147,7 +147,7 @@ export default function Linker({
   }
 
   useEffect(() => {
-    if (!u.id || u.hasEva) {
+    if (!u.id) {
       evaSuggestionRequestRef.current += 1;
       setEvaList([]);
       return;
@@ -157,15 +157,15 @@ export default function Linker({
     evaSuggestionRequestRef.current = requestId;
     const controller = new AbortController();
     const term = lkEvaSearch.trim();
-    const excludeEva = asociar
-      .filter((z) => z.evaId && z.id !== u.id)
-      .map((z) => String(z.evaId))
-      .join(",");
 
     const timer = window.setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ q: term, signiaId: String(u.id) });
-        if (excludeEva) params.set("exclude", excludeEva);
+        const params = new URLSearchParams({
+          q: term,
+          signiaId: String(u.id),
+          intent: "manual",
+          includeLinked: "1",
+        });
         const response = await fetch(`/api/search-eva?${params.toString()}`, {
           signal: controller.signal,
           cache: "no-store",
@@ -183,10 +183,10 @@ export default function Linker({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [lkEvaSearch, u.id, u.hasEva, asociar]);
+  }, [lkEvaSearch, u.id]);
 
   useEffect(() => {
-    if (!u.id || u.hasPath) {
+    if (!u.id) {
       pathSuggestionRequestRef.current += 1;
       setPathList([]);
       return;
@@ -196,15 +196,15 @@ export default function Linker({
     pathSuggestionRequestRef.current = requestId;
     const controller = new AbortController();
     const term = lkPathSearch.trim();
-    const excludePath = asociar
-      .filter((z) => z.pathId && z.id !== u.id)
-      .map((z) => String(z.pathId))
-      .join(",");
 
     const timer = window.setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ q: term, signiaId: String(u.id) });
-        if (excludePath) params.set("exclude", excludePath);
+        const params = new URLSearchParams({
+          q: term,
+          signiaId: String(u.id),
+          intent: "manual",
+          includeLinked: "1",
+        });
         const response = await fetch(`/api/search-path?${params.toString()}`, {
           signal: controller.signal,
           cache: "no-store",
@@ -234,7 +234,7 @@ export default function Linker({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [lkPathSearch, u.id, u.hasPath, asociar]);
+  }, [lkPathSearch, u.id]);
 
   useEffect(() => {
     if (currIdx > maxIdx && maxIdx >= 0) setIdx(0);
@@ -283,29 +283,49 @@ export default function Linker({
     }, 100);
   }, [u.id, setNames]);
 
-  async function handleAssociateEva(cid) {
+  function shouldForceAssociation(item, sourceLabel) {
+    if (!item?.requiresConfirmation && item?.linkStatus?.state !== "linked_to_other") {
+      return false;
+    }
+
+    const owner = item?.linkStatus?.signiaName || "otro Signia";
+    const reason = item?.linkStatus?.state === "linked_to_other"
+      ? `${sourceLabel} #${item.cid} ya está vinculado a ${owner}. Si continúas, se quitará esa vinculación anterior y se asignará al Signia actual.`
+      : `${sourceLabel} #${item.cid} tiene baja certeza. Revisa nombre y correo antes de asociar.`;
+
+    return window.confirm(`${reason}
+
+¿Continuar con la asociación manual?`);
+  }
+
+  async function handleAssociateEva(itemOrCid) {
     if (!u.id) return;
+    const item = typeof itemOrCid === "object" ? itemOrCid : { cid: itemOrCid };
+    const cid = item.cid;
+    const force = shouldForceAssociation(item, "EVA");
+    if ((item.requiresConfirmation || item.linkStatus?.state === "linked_to_other") && !force) return;
+
     setEvaSavingId(cid);
     setEvaSaveError("");
     try {
       const resp = await fetch("/api/associate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signiaId: u.id, source: "eva", cid }),
+        body: JSON.stringify({ signiaId: u.id, source: "eva", cid, force }),
       });
+      const payload = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        let errText = "Error al asociar EVA";
-        try {
-          errText = (await resp.json()).error || errText;
-        } catch {}
-        setEvaSaveError(errText);
+        setEvaSaveError(payload?.error || "Error al asociar EVA");
         setEvaSavingId(null);
         return;
       }
       setAsociar((prev) =>
-        prev.map((user) =>
-          user.id === u.id ? { ...user, evaId: +cid, hasEva: true } : user,
-        ),
+        prev.map((user) => {
+          if (payload?.reassignedFrom && String(user.id) === String(payload.reassignedFrom)) {
+            return { ...user, evaId: null, hasEva: false };
+          }
+          return user.id === u.id ? { ...user, evaId: +cid, hasEva: true } : user;
+        }),
       );
       setEvaList([]);
     } catch (err) {
@@ -315,39 +335,52 @@ export default function Linker({
     }
   }
 
-  async function handleAssociatePath(cid) {
+  async function handleAssociatePath(itemOrCid) {
     if (!u.id) return;
+    const item = typeof itemOrCid === "object" ? itemOrCid : { cid: itemOrCid };
+    const cid = item.cid;
+    const force = shouldForceAssociation(item, "PATH");
+    if ((item.requiresConfirmation || item.linkStatus?.state === "linked_to_other") && !force) return;
+
     setPathSavingId(cid);
     setPathSaveError("");
     try {
       const resp = await fetch("/api/associate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signiaId: u.id, source: "path", cid }),
+        body: JSON.stringify({ signiaId: u.id, source: "path", cid, force }),
       });
+      const payload = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        let errText = "Error al asociar PATH";
-        try {
-          errText = (await resp.json()).error || errText;
-        } catch {}
-        setPathSaveError(errText);
+        setPathSaveError(payload?.error || "Error al asociar PATH");
         setPathSavingId(null);
         return;
       }
       setAsociar((prev) =>
-        prev.map((user) =>
-          user.id === u.id
+        prev.map((user) => {
+          if (payload?.reassignedFrom && String(user.id) === String(payload.reassignedFrom)) {
+            return {
+              ...user,
+              pathId: null,
+              hasPath: false,
+              hasEco: false,
+              hasMmpi: false,
+              ecoPrueba: null,
+              mmpiPrueba: null,
+            };
+          }
+          return user.id === u.id
             ? {
                 ...user,
                 pathId: +cid,
                 hasPath: true,
-                hasEco: false,
-                hasMmpi: false,
+                hasEco: Boolean(item.tests?.eco),
+                hasMmpi: Boolean(item.tests?.mmpi),
                 ecoPrueba: null,
                 mmpiPrueba: null,
               }
-            : user,
-        ),
+            : user;
+        }),
       );
       setPathList([]);
     } catch (err) {
@@ -580,8 +613,9 @@ export default function Linker({
                 Buscar en EVA
               </h3>
               <input
+                type="search"
                 className="block w-full mb-3 rounded-lg border border-indigo-200 bg-white placeholder:text-gray-400 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition"
-                placeholder="Nombre o email..."
+                placeholder="Nombre, email o ID..."
                 value={lkEvaSearch}
                 onChange={(e) => setLkEvaSearch(e.target.value)}
               />
@@ -688,8 +722,9 @@ export default function Linker({
                 Buscar en PATH
               </h3>
               <input
+                type="search"
                 className="block w-full mb-3 rounded-lg border border-emerald-200 bg-white placeholder:text-gray-400 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition"
-                placeholder="Nombre o email..."
+                placeholder="Nombre, email o ID..."
                 value={lkPathSearch}
                 onChange={(e) => setLkPathSearch(e.target.value)}
               />

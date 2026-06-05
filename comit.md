@@ -1,1 +1,1 @@
-Corrige vinculación manual y automática por nombre y elimina flujo GPT
+Rediseña asociación manual con búsqueda visible, estados de conflicto y protección de reasignación
