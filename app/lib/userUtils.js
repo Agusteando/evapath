@@ -74,7 +74,7 @@ export function filterByMissingCategory(users, filter) {
  * - Then optionally filters by plantelId.
  * - Finally applies a text search over full name, email, CURP, and plantel label/name.
  *
- * This ensures navigation, GPT-bulk operations, and UI counts all
+ * This ensures navigation and UI counts all
  * operate over the same filtered subset of users.
  */
 export function filterLinkerUsers(

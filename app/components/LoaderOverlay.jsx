@@ -33,8 +33,7 @@ export default function LoaderOverlay({
         "Ocurrió un problema al conectar con Evaluatest. Puedes intentar actualizar nuevamente.";
     }
   } else if (text) {
-    // Legacy CURP/GPT use: keep original wording
-    title = "Procesando CURP con GPT…";
+    title = "Procesando…";
     description = text;
   }
 

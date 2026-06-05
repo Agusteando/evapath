@@ -15,7 +15,7 @@ export default function AutoMatchView({ setView }) {
     const fetchAll = async () => {
       try {
         const [sigRes, evaRes, pathRes] = await Promise.all([
-          fetch("/api/signia-users?page=1&pageSize=5000"),
+          fetch("/api/signia-missing"),
           fetch("/api/evaluatest-users?page=1&pageSize=5000"),
           fetch("/api/reclutamiento-users?page=1&pageSize=5000"),
         ]);
@@ -34,7 +34,7 @@ export default function AutoMatchView({ setView }) {
           throw new Error(path?.error || "No se pudieron cargar usuarios PATH");
 
         setData({
-          signia: sig.users || [],
+          signia: Array.isArray(sig) ? sig : sig.users || [],
           eva: eva.users || [],
           path: path.users || [],
           loading: false,

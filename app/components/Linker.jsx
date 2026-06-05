@@ -1,13 +1,11 @@
 "use client";
 import React, { useEffect, useState, useMemo, useRef } from "react";
-import LoaderOverlay from "./LoaderOverlay";
 import StatusBadge from "./StatusBadge";
 import SuggestionList from "./SuggestionList";
 import NamesEditBlock from "./NamesEditBlock";
 import NavBar from "./NavBar";
 import FilterBar from "./FilterBar";
 import UserStatsBar from "./UserStatsBar";
-import useGptBulk from "../hooks/useGptBulk";
 import {
   classNames,
   BTN_BASE,
@@ -58,32 +56,7 @@ export default function Linker({
   const [pathSaveError, setPathSaveError] = useState("");
   const [disassociating, setDisassociating] = useState(null);
 
-  const {
-    gptExtracting,
-    gptBulk,
-    gptBulkStopped,
-    gptBulkProgress,
-    gptErr,
-    handleGptExtractManual,
-    canExtractCurpGpt,
-    handleBulkTrigger,
-    handleGptBulkStop,
-    allExtractable,
-  } = useGptBulk({
-    asociar,
-    filters,
-    searchTerm,
-    plantelFilter,
-    idx,
-    setIdx,
-    _names,
-    setNames: _setNames,
-    setAsociar,
-    nameFieldState,
-    setNameFieldState,
-    nameFieldErr,
-    setNameFieldErr,
-  });
+
 
   const _filtered = useMemo(
     () =>
@@ -138,14 +111,6 @@ export default function Linker({
         }
       }
 
-      if (
-        (e.ctrlKey || e.metaKey) &&
-        (e.key === "g" || e.key === "G") &&
-        canExtractCurpGpt
-      ) {
-        e.preventDefault();
-        handleGptExtractManual();
-      }
 
       if (e.key === "Escape") {
         e.preventDefault();
@@ -165,8 +130,6 @@ export default function Linker({
     _filtered.length,
     setIdx,
     setLinkMode,
-    canExtractCurpGpt,
-    handleGptExtractManual,
     names,
     u,
   ]);
@@ -180,8 +143,7 @@ export default function Linker({
       user.name ||
       ""
     ).trim();
-    const firstNameToken = name.split(/\s+/).find(Boolean);
-    return firstNameToken || user.email || "";
+    return name || user.email || "";
   }
 
   useEffect(() => {
@@ -202,7 +164,7 @@ export default function Linker({
 
     const timer = window.setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ q: term });
+        const params = new URLSearchParams({ q: term, signiaId: String(u.id) });
         if (excludeEva) params.set("exclude", excludeEva);
         const response = await fetch(`/api/search-eva?${params.toString()}`, {
           signal: controller.signal,
@@ -241,7 +203,7 @@ export default function Linker({
 
     const timer = window.setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ q: term });
+        const params = new URLSearchParams({ q: term, signiaId: String(u.id) });
         if (excludePath) params.set("exclude", excludePath);
         const response = await fetch(`/api/search-path?${params.toString()}`, {
           signal: controller.signal,
@@ -535,14 +497,6 @@ export default function Linker({
 
   return (
     <div className="w-full max-w-7xl mx-auto mt-2 pb-10 relative">
-      <LoaderOverlay
-        show={gptExtracting || gptBulk}
-        text={
-          gptBulk
-            ? `Procesando CURP ${gptBulkProgress.done + 1} de ${gptBulkProgress.total}`
-            : "Procesando CURP…"
-        }
-      />
 
       {/* Navigation & Controls */}
       <NavBar
@@ -556,15 +510,6 @@ export default function Linker({
           await saveAllPendingChanges();
           setLinkMode();
         }}
-        gptExtracting={gptExtracting}
-        gptBulk={gptBulk}
-        gptBulkStopped={gptBulkStopped}
-        canExtractCurpGpt={canExtractCurpGpt}
-        handleGptExtractManual={handleGptExtractManual}
-        handleBulkTrigger={handleBulkTrigger}
-        handleGptBulkStop={handleGptBulkStop}
-        gptBulkProgress={gptBulkProgress}
-        allExtractable={allExtractable}
       />
 
       {_filtered.length > 0 && (
@@ -603,11 +548,6 @@ export default function Linker({
         }}
       />
 
-      {gptErr && (
-        <div className="text-center mb-3 px-4 py-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 font-semibold text-sm">
-          ⚠️ {gptErr}
-        </div>
-      )}
 
       {_filtered.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
@@ -644,13 +584,11 @@ export default function Linker({
                 placeholder="Nombre o email..."
                 value={lkEvaSearch}
                 onChange={(e) => setLkEvaSearch(e.target.value)}
-                disabled={gptBulk}
               />
               <SuggestionList
                 title="Resultados"
                 list={evaList}
                 onAssociate={handleAssociateEva}
-                disabled={gptBulk}
                 loadingForId={evaSavingId}
               />
               {!!u.hasEva && (
@@ -663,7 +601,7 @@ export default function Linker({
                   <button
                     className="text-rose-600 hover:text-rose-700 font-bold text-xs underline"
                     onClick={() => handleDisassociate("eva")}
-                    disabled={gptBulk || disassociating === "eva"}
+                    disabled={disassociating === "eva"}
                     type="button"
                   >
                     Desasociar EVA
@@ -754,13 +692,11 @@ export default function Linker({
                 placeholder="Nombre o email..."
                 value={lkPathSearch}
                 onChange={(e) => setLkPathSearch(e.target.value)}
-                disabled={gptBulk}
               />
               <SuggestionList
                 title="Resultados"
                 list={pathList}
                 onAssociate={handleAssociatePath}
-                disabled={gptBulk}
                 loadingForId={pathSavingId}
               />
               {!!u.hasPath && (
@@ -773,7 +709,7 @@ export default function Linker({
                   <button
                     className="text-rose-600 hover:text-rose-700 font-bold text-xs underline"
                     onClick={() => handleDisassociate("path")}
-                    disabled={gptBulk || disassociating === "path"}
+                    disabled={disassociating === "path"}
                     type="button"
                   >
                     Desasociar PATH

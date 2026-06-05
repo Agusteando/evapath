@@ -1,5 +1,5 @@
 import { getSigniaPool, getPathPool } from "./serverDb.js";
-import { computeNameMatchScore, tokenizeName } from "./nameMatch.js";
+import { computeNameMatchScore, getBestPersonName, tokenizeName } from "./nameMatch.js";
 import { getDisplayName, getCurrentStatus } from "./bulkEmailSync.js";
 import { getEvaEmail, getPathEmail, getSigniaEmail } from "./emailIdentity.js";
 import { hasLinkValue, normalizeLinkId } from "./linkIdentity.js";
@@ -11,13 +11,7 @@ function normalizeId(value) {
 }
 
 function signiaFullName(user = {}) {
-  return (
-    [user.nombres, user.apellidoPaterno, user.apellidoMaterno]
-      .filter(Boolean)
-      .join(" ") ||
-    user.name ||
-    ""
-  ).trim();
+  return getBestPersonName(user);
 }
 
 function buildCandidateTokenIndex(candidates = []) {
@@ -147,7 +141,6 @@ function findSafeTopMatch({ user, candidates, linkedIds, minScore }) {
       candidate.email,
     );
 
-    if (metrics.exactEmail) continue;
     if (!metrics.viable || metrics.score < minScore) continue;
     ranked.push({ candidate, metrics });
   }

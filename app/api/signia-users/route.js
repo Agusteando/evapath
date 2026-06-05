@@ -33,7 +33,7 @@ async function GET(req) {
     const pathDB = await getPathPool();
 
     const [sigAll] = await signiaDB.query(
-      "SELECT id,email,name,evaId,pathId,fechaIngreso FROM user WHERE isActive=1",
+      "SELECT id,nombres,apellidoPaterno,apellidoMaterno,email,name,evaId,pathId,fechaIngreso FROM user WHERE isActive=1",
     );
 
     const eva = getEva();
@@ -118,7 +118,13 @@ async function GET(req) {
       list = list.filter((u) => !(hasLinkValue(u.evaId) && hasLinkValue(u.pathId)));
     const q = (searchParams.get("q") || "").toLowerCase();
     if (q)
-      list = list.filter((u) => (u.name + u.email).toLowerCase().includes(q));
+      list = list.filter((u) =>
+        [u.nombres, u.apellidoPaterno, u.apellidoMaterno, u.name, u.email]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
+      );
 
     const pag = (a, p, ps) => {
       const tot = a.length,

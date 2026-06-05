@@ -1,10 +1,8 @@
 import { normalizeEmail } from "./emailIdentity.js";
 
-
 /**
  * Shared name-matching utilities for EVA and ECO/MMPI pipelines.
- * Implements strict per-word matching with ≥2/3 coverage and
- * high per-word similarity, plus a global similarity and email signal.
+ * The same scoring is used by manual search, Auto-Similitud, and bulk name sync.
  */
 
 const STOP_WORDS = new Set([
@@ -21,13 +19,6 @@ const STOP_WORDS = new Set([
   "das",
 ]);
 
-/**
- * Normalize a string for robust person-name comparison:
- * - lowercase
- * - remove diacritics
- * - strip punctuation to spaces
- * - collapse whitespace
- */
 export function normalizeString(str) {
   return (str || "")
     .toLowerCase()
@@ -38,23 +29,47 @@ export function normalizeString(str) {
     .trim();
 }
 
-/**
- * Split a name into meaningful tokens, removing very short tokens
- * and common Spanish connectors (de, del, la, etc.).
- */
 export function tokenizeName(name) {
   const norm = normalizeString(name);
   if (!norm) return [];
   return norm
     .split(" ")
-    .filter(
-      (tok) => tok && tok.length > 1 && !STOP_WORDS.has(tok)
-    );
+    .filter((tok) => tok && tok.length > 1 && !STOP_WORDS.has(tok));
 }
 
-/**
- * Classic Levenshtein distance used for similarity on short strings.
- */
+function firstPresent(record, keys) {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (value !== null && value !== undefined && String(value).trim()) {
+      return String(value).trim();
+    }
+  }
+  return "";
+}
+
+export function buildStructuredPersonName(record = {}) {
+  return [
+    firstPresent(record, ["nombres", "nombre", "firstName"]),
+    firstPresent(record, ["apellidoPaterno", "apellidopaterno", "lastName", "paterno"]),
+    firstPresent(record, ["apellidoMaterno", "apellidomaterno", "materno"]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function getBestPersonName(record = {}) {
+  const structured = buildStructuredPersonName(record);
+  const fallback = firstPresent(record, ["fullName", "name", "nombre", "N", "label"]);
+  if (!structured) return fallback.trim();
+  if (!fallback) return structured.trim();
+
+  const structuredTokenCount = tokenizeName(structured).length;
+  const fallbackTokenCount = tokenizeName(fallback).length;
+  return (fallbackTokenCount > structuredTokenCount ? fallback : structured).trim();
+}
+
 export function levenshteinDistance(str1, str2) {
   const a = str1 || "";
   const b = str2 || "";
@@ -74,16 +89,13 @@ export function levenshteinDistance(str1, str2) {
       matrix[i][j] = Math.min(
         matrix[i - 1][j] + 1,
         matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
+        matrix[i - 1][j - 1] + cost,
       );
     }
   }
   return matrix[len1][len2];
 }
 
-/**
- * Normalized similarity between two short words: 0–1.
- */
 export function wordSimilarity(a, b) {
   const s1 = normalizeString(a);
   const s2 = normalizeString(b);
@@ -96,9 +108,6 @@ export function wordSimilarity(a, b) {
   return (maxLen - dist) / maxLen;
 }
 
-/**
- * Global string similarity (0–100) using Levenshtein.
- */
 export function stringSimilarity(str1, str2) {
   const s1 = normalizeString(str1);
   const s2 = normalizeString(str2);
@@ -111,11 +120,6 @@ export function stringSimilarity(str1, str2) {
   return Math.round(((maxLen - dist) / maxLen) * 100);
 }
 
-/**
- * Greedy per-word matching:
- * - each token in A (Signia) picks the best unused token in B (candidate)
- * - only matches with similarity >= perWordThreshold are counted
- */
 function matchTokens(tokensA, tokensB, perWordThreshold) {
   const usedB = new Set();
   let matchedCount = 0;
@@ -128,8 +132,7 @@ function matchTokens(tokensA, tokensB, perWordThreshold) {
 
     for (let j = 0; j < tokensB.length; j++) {
       if (usedB.has(j)) continue;
-      const b = tokensB[j];
-      const sim = wordSimilarity(a, b);
+      const sim = wordSimilarity(a, tokensB[j]);
       if (sim > bestSim) {
         bestSim = sim;
         bestIndex = j;
@@ -145,27 +148,15 @@ function matchTokens(tokensA, tokensB, perWordThreshold) {
 
   const coverageA = tokensA.length ? matchedCount / tokensA.length : 0;
   const avgWordSim = matchedCount ? sumWordSim / matchedCount : 0;
-
   return { matchedCount, coverageA, avgWordSim };
 }
 
-/**
- * Compute a rich, strict name-match score (0–100) and viability flag
- * between a Signia user and a candidate (EVA or PATH).
- *
- * Options allow tuning thresholds, but defaults are:
- * - coverageThreshold: 0.66 (2/3 of Signia tokens)
- * - perWordThreshold: 0.86 (high per-word similarity)
- */
 export function computeNameMatchScore(
   signiaName,
   candidateName,
   signiaEmail,
   candidateEmail,
-  {
-    coverageThreshold = 0.66,
-    perWordThreshold = 0.86,
-  } = {}
+  { coverageThreshold = 0.66, perWordThreshold = 0.86 } = {},
 ) {
   const normalizedSigniaEmail = normalizeEmail(signiaEmail);
   const normalizedCandidateEmail = normalizeEmail(candidateEmail);
@@ -207,28 +198,19 @@ export function computeNameMatchScore(
   const { matchedCount, coverageA, avgWordSim } = matchTokens(
     tokensA,
     tokensB,
-    perWordThreshold
+    perWordThreshold,
   );
 
-  // Require at least 2/3 of Signia tokens to be matched (rounded)
-  const minRequiredMatches = Math.max(
-    1,
-    Math.round((tokensA.length * 2) / 3)
-  );
-
-  // Global similarity using sorted tokens (order-insensitive)
+  const minRequiredMatches = Math.max(1, Math.ceil(tokensA.length * coverageThreshold));
   const sortedA = tokensA.slice().sort().join(" ");
   const sortedB = tokensB.slice().sort().join(" ");
-  const globalSim = stringSimilarity(sortedA, sortedB); // 0–100
+  const globalSim = stringSimilarity(sortedA, sortedB);
 
-  // Email local-part similarity as an extra hint
   let emailScore = 0;
   if (signiaEmail && candidateEmail) {
     const e1 = normalizeString(signiaEmail.split("@")[0]);
     const e2 = normalizeString(candidateEmail.split("@")[0]);
-    if (e1 && e2) {
-      emailScore = stringSimilarity(e1, e2); // 0–100
-    }
+    if (e1 && e2) emailScore = stringSimilarity(e1, e2);
   }
 
   const viable =
@@ -249,15 +231,13 @@ export function computeNameMatchScore(
     };
   }
 
-  // Weighted final score (0–100)
   const coverageScore = coverageA * 100;
   const perWordScore = avgWordSim * 100;
-
   const score = Math.round(
-    coverageScore * 0.55 + // coverage dominates
-      perWordScore * 0.25 + // average per-token similarity
-      globalSim * 0.15 + // global sorted-name similarity
-      emailScore * 0.05 // email hint
+    coverageScore * 0.55 +
+      perWordScore * 0.25 +
+      globalSim * 0.15 +
+      emailScore * 0.05,
   );
 
   return {
@@ -270,4 +250,104 @@ export function computeNameMatchScore(
     exactEmail: false,
     viable: true,
   };
+}
+
+function queryScore(query, candidateName, candidateEmail = "", candidateText = "") {
+  const normalizedQuery = normalizeString(query);
+  if (!normalizedQuery) return 0;
+
+  const haystack = normalizeString(
+    [candidateName, candidateEmail, candidateText].filter(Boolean).join(" "),
+  );
+  if (!haystack) return 0;
+  if (haystack.includes(normalizedQuery)) return 100;
+
+  const queryTokens = tokenizeName(normalizedQuery);
+  if (!queryTokens.length) return 0;
+  const haystackTokens = tokenizeName(haystack);
+  if (!haystackTokens.length) return 0;
+
+  let matched = 0;
+  let sum = 0;
+  for (const qToken of queryTokens) {
+    let best = 0;
+    for (const hToken of haystackTokens) {
+      best = Math.max(best, wordSimilarity(qToken, hToken));
+    }
+    if (best >= 0.82) matched += 1;
+    sum += best;
+  }
+
+  const coverage = matched / queryTokens.length;
+  const average = sum / queryTokens.length;
+  return Math.round((coverage * 0.7 + average * 0.3) * 100);
+}
+
+export function rankPersonCandidates({
+  signiaUser,
+  signiaName,
+  signiaEmail,
+  candidates = [],
+  query = "",
+  excludedIds = [],
+  getCandidateId = (candidate) => candidate.id,
+  getCandidateName = (candidate) => getBestPersonName(candidate),
+  getCandidateEmail = (candidate) => candidate.email || candidate.correo || candidate.M || "",
+  getCandidateText = () => "",
+  limit = 20,
+  minScore = 0,
+  includeWeakTextMatches = true,
+} = {}) {
+  const resolvedSigniaName = (signiaName || getBestPersonName(signiaUser) || "").trim();
+  const resolvedSigniaEmail = signiaEmail || signiaUser?.email || "";
+  const excludedSet = new Set((excludedIds || []).map((id) => String(id)));
+
+  const ranked = [];
+  for (const candidate of candidates || []) {
+    const id = getCandidateId(candidate);
+    if (!id || excludedSet.has(String(id))) continue;
+
+    const candidateName = getCandidateName(candidate);
+    const candidateEmail = getCandidateEmail(candidate);
+    const candidateText = getCandidateText(candidate);
+    const metrics = computeNameMatchScore(
+      resolvedSigniaName,
+      candidateName,
+      resolvedSigniaEmail,
+      candidateEmail,
+      { coverageThreshold: 0.5, perWordThreshold: 0.82 },
+    );
+    const qScore = queryScore(query || resolvedSigniaName, candidateName, candidateEmail, candidateText);
+    const displayScore = Math.max(metrics.score, qScore, metrics.exactEmail ? 100 : 0);
+
+    if (
+      displayScore < minScore &&
+      !metrics.exactEmail &&
+      !metrics.viable &&
+      !(includeWeakTextMatches && qScore >= 70)
+    ) {
+      continue;
+    }
+
+    ranked.push({
+      candidate,
+      id,
+      name: candidateName,
+      email: candidateEmail,
+      metrics,
+      queryScore: qScore,
+      displayScore,
+    });
+  }
+
+  ranked.sort((a, b) => {
+    if (b.metrics.exactEmail !== a.metrics.exactEmail) return b.metrics.exactEmail ? 1 : -1;
+    if (b.metrics.viable !== a.metrics.viable) return b.metrics.viable ? 1 : -1;
+    if (b.displayScore !== a.displayScore) return b.displayScore - a.displayScore;
+    if (b.metrics.globalSim !== a.metrics.globalSim) return b.metrics.globalSim - a.metrics.globalSim;
+    if (b.metrics.matchedCount !== a.metrics.matchedCount) return b.metrics.matchedCount - a.metrics.matchedCount;
+    return a.name.localeCompare(b.name, "es");
+  });
+
+  return ranked.slice(0, limit);
 }

@@ -34,10 +34,6 @@ function parseActionDetails(log) {
       title = "Actualizó nombres de expediente";
       description = `Base de datos interna Signia`;
       break;
-    case "GPT_EXTRACT_CURP":
-      title = "Extracción automática de CURP";
-      description = `Procesamiento mediante OpenAI OCR`;
-      break;
   }
   return { title, description };
 }

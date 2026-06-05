@@ -1,9 +1,24 @@
 import { NextResponse } from "next/server";
-import { waitEva, getEva } from "../shared.js";
+import { waitEva, getEva, getSigniaPool } from "../shared.js";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../lib/auth";
+import { getEvaEmail, getSigniaEmail } from "../../lib/emailIdentity.js";
+import { getBestPersonName, rankPersonCandidates } from "../../lib/nameMatch.js";
 
-export async function GET(req, context) {
+async function getSigniaUser(signiaId) {
+  if (!signiaId) return null;
+  const signiaDB = await getSigniaPool();
+  const [rows] = await signiaDB.query(
+    `SELECT id,nombres,apellidoPaterno,apellidoMaterno,name,email
+     FROM user
+     WHERE isActive=1 AND id=?
+     LIMIT 1`,
+    [signiaId],
+  );
+  return rows?.[0] || null;
+}
+
+export async function GET(req) {
   const session = await getServerSession(authOptions);
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
@@ -29,35 +44,46 @@ export async function GET(req, context) {
 
   const { searchParams } = new URL(req.url);
   const rawTerm = searchParams.get("q") || "";
-  const term = rawTerm.toLowerCase();
-  let exclude = (searchParams.get("exclude") || "")
+  const signiaId = searchParams.get("signiaId") || "";
+  const exclude = (searchParams.get("exclude") || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  if (exclude.length) {
-    const excludeSet = new Set(exclude.map(String));
-    evaUsers = evaUsers.filter((u) => !excludeSet.has(String(u.CID)));
+  let signiaUser = null;
+  try {
+    signiaUser = await getSigniaUser(signiaId);
+  } catch (error) {
+    console.warn("[search-eva] Could not load Signia context:", error?.message);
   }
 
-  if (term) {
-    evaUsers = evaUsers.filter(
-      (u) =>
-        (u.nombre || "").toLowerCase().includes(term) ||
-        (u.puesto || "").toLowerCase().includes(term) ||
-        (u.correo || "").toLowerCase().includes(term),
-    );
-  }
+  const ranked = rankPersonCandidates({
+    signiaUser,
+    signiaName: getBestPersonName(signiaUser),
+    signiaEmail: getSigniaEmail(signiaUser),
+    candidates: evaUsers || [],
+    query: rawTerm,
+    excludedIds: exclude,
+    getCandidateId: (candidate) => candidate.CID,
+    getCandidateName: (candidate) => candidate.nombre || candidate.N || "",
+    getCandidateEmail: (candidate) => getEvaEmail(candidate),
+    getCandidateText: (candidate) => [candidate.puesto || candidate.JN, candidate.estado]
+      .filter(Boolean)
+      .join(" "),
+    limit: 20,
+    minScore: rawTerm || signiaUser ? 50 : 0,
+  });
 
   return NextResponse.json(
-    evaUsers
-      .slice(0, 20)
-      .map((u) => ({
-        cid: u.CID,
-        label: u.nombre ?? "",
-        name: u.nombre ?? "",
-        email: u.correo ?? "",
-        puesto: u.puesto ?? "",
-      })),
+    ranked.map(({ candidate, name, email, metrics, displayScore }) => ({
+      cid: candidate.CID,
+      label: name,
+      name,
+      email,
+      puesto: candidate.puesto || candidate.JN || "",
+      score: displayScore,
+      exactEmail: metrics.exactEmail,
+      viable: metrics.viable,
+    })),
   );
 }

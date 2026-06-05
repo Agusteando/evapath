@@ -6,8 +6,8 @@ import {
   BTN_VARIANTS,
   classNames,
 } from "../lib/designTokens";
-import { computeNameMatchScore } from "../lib/nameMatch";
-import { getAnyRecordEmail, getEvaEmail, getPathEmail, getSigniaEmail, normalizeEmail } from "../lib/emailIdentity";
+import { getBestPersonName, rankPersonCandidates } from "../lib/nameMatch";
+import { getEvaEmail, getPathEmail, getSigniaEmail } from "../lib/emailIdentity";
 import { hasLinkValue, normalizeLinkId } from "../lib/linkIdentity";
 
 export default function AutoSimilarity({
@@ -42,10 +42,12 @@ export default function AutoSimilarity({
     // Search filter
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
-      list = list.filter(
-        (u) =>
-          (u.name || "").toLowerCase().includes(q) ||
-          (u.email || "").toLowerCase().includes(q),
+      list = list.filter((u) =>
+        [getBestPersonName(u), u.email, u.plantelLabel, u.plantelName]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
       );
     }
     return list;
@@ -97,72 +99,61 @@ export default function AutoSimilarity({
   const { evaMatches, pathMatches } = useMemo(() => {
     if (!currentSignia) return { evaMatches: [], pathMatches: [] };
 
-    const signiaName = currentSignia.name || "";
-    // Build full name for PATH matching (often better than username)
-    const fullName = [
-      currentSignia.nombres,
-      currentSignia.apellidoPaterno,
-      currentSignia.apellidoMaterno,
-    ]
-      .filter(Boolean)
-      .join(" ");
-
+    const signiaName = getBestPersonName(currentSignia);
     const signiaEmail = getSigniaEmail(currentSignia);
-    const exactEmailCandidate = (source, preferredGetter) => {
-      const candidateEmail = preferredGetter(source) || getAnyRecordEmail(source);
-      return Boolean(signiaEmail && candidateEmail && normalizeEmail(signiaEmail) === normalizeEmail(candidateEmail));
-    };
 
-    const evaHasAnyExactEmail = (evaUsers || []).some((source) => exactEmailCandidate(source, getEvaEmail));
-    const pathHasAnyExactEmail = (pathUsers || []).some((source) => exactEmailCandidate(source, getPathEmail));
+    const buildEvaMatch = ({ candidate, metrics, displayScore }) => ({
+      source: candidate,
+      ...metrics,
+      score: displayScore,
+      takenBy: evaOwnerMap.get(String(candidate.CID)),
+    });
 
-    // --- Match EVA ---
-    let evaM = [];
-    if (!hasLinkValue(currentSignia.evaId) && !evaHasAnyExactEmail) {
-      evaM = evaUsers
-        .map((source) => {
-          const candidateEmail = getEvaEmail(source) || getAnyRecordEmail(source);
-          const metrics = computeNameMatchScore(
-            signiaName || fullName,
-            source.nombre || "",
-            signiaEmail,
-            candidateEmail,
-          );
-          return {
-            source,
-            ...metrics,
-            exactEmail: metrics.exactEmail || exactEmailCandidate(source, getEvaEmail),
-            takenBy: evaOwnerMap.get(String(source.CID)),
-          };
+    const buildPathMatch = ({ candidate, metrics, displayScore }) => ({
+      source: candidate,
+      ...metrics,
+      score: displayScore,
+      takenBy: pathOwnerMap.get(String(candidate.id)),
+    });
+
+    const evaM = hasLinkValue(currentSignia.evaId)
+      ? []
+      : rankPersonCandidates({
+          signiaUser: currentSignia,
+          signiaName,
+          signiaEmail,
+          candidates: evaUsers || [],
+          query: signiaName,
+          getCandidateId: (source) => source.CID,
+          getCandidateName: (source) => source.nombre || source.N || "",
+          getCandidateEmail: (source) => getEvaEmail(source),
+          getCandidateText: (source) => [source.puesto || source.JN, source.estado]
+            .filter(Boolean)
+            .join(" "),
+          minScore: 50,
+          limit: 12,
         })
-        .filter((m) => m.viable && !m.exactEmail && !m.takenBy)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
-    }
+          .map(buildEvaMatch)
+          .filter((match) => !match.takenBy && (match.exactEmail || match.viable || match.score >= 70))
+          .slice(0, 3);
 
-    // --- Match PATH ---
-    let pathM = [];
-    if (!hasLinkValue(currentSignia.pathId) && !pathHasAnyExactEmail) {
-      pathM = pathUsers
-        .map((source) => {
-          const candidateEmail = getPathEmail(source) || getAnyRecordEmail(source);
-          const metrics = computeNameMatchScore(
-            fullName || signiaName,
-            source.nombre || "",
-            signiaEmail,
-            candidateEmail,
-          );
-          return {
-            source,
-            ...metrics,
-            exactEmail: metrics.exactEmail || exactEmailCandidate(source, getPathEmail),
-            takenBy: pathOwnerMap.get(String(source.id)),
-          };
+    const pathM = hasLinkValue(currentSignia.pathId)
+      ? []
+      : rankPersonCandidates({
+          signiaUser: currentSignia,
+          signiaName,
+          signiaEmail,
+          candidates: pathUsers || [],
+          query: signiaName,
+          getCandidateId: (source) => source.id,
+          getCandidateName: (source) => source.nombre || "",
+          getCandidateEmail: (source) => getPathEmail(source),
+          minScore: 50,
+          limit: 12,
         })
-        .filter((m) => m.viable && !m.exactEmail && !m.takenBy)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
-    }
+          .map(buildPathMatch)
+          .filter((match) => !match.takenBy && (match.exactEmail || match.viable || match.score >= 70))
+          .slice(0, 3);
 
     return { evaMatches: evaM, pathMatches: pathM };
   }, [currentSignia, evaUsers, pathUsers, evaOwnerMap, pathOwnerMap]);
@@ -376,7 +367,7 @@ export default function AutoSimilarity({
           </div>
 
           <h2 className="text-3xl font-bold text-slate-800 leading-tight mb-1">
-            {currentSignia.name || <i className="text-slate-300">Sin Nombre</i>}
+            {getBestPersonName(currentSignia) || <i className="text-slate-300">Sin Nombre</i>}
           </h2>
           <div className="text-sm text-slate-500 font-mono mb-6">
             {currentSignia.email}
